@@ -189,8 +189,8 @@ github.com/charmbracelet/x/conpty v0.1.1 h1:s1bUxjoi7EpqiXysVtC+a8RrvPPNcNvAjfi4
 github.com/charmbracelet/x/conpty v0.1.1/go.mod h1:OmtR77VODEFbiTzGE9G1XiRJAga6011PIm4u5fTNZpk=
 github.com/charmbracelet/x/errors v0.0.0-20240508181413-e8d8b6e2de86 h1:JSt3B+U9iqk37QUU2Rvb6DSBYRLtWqFqfxf8l5hOZUA=
 github.com/charmbracelet/x/errors v0.0.0-20240508181413-e8d8b6e2de86/go.mod h1:2P0UgXMEa6TsToMSuFqKFQR+fZTO9CNGUNokkPatT/0=
-github.com/charmbracelet/x/exp/charmtone v0.0.0-20260109001716-2fbdffcb221f h1:OKFNbG2sSmgpQW9EC3gYNG+QrcQ4+wWYjzfmJvWkkDo=
-github.com/charmbracelet/x/exp/charmtone v0.0.0-20260109001716-2fbdffcb221f/go.mod h1:nsExn0DGyX0lh9LwLHTn2Gg+hafdzfSXnC+QmEJTZFY=
+github.com/charmbracelet/x/exp/charmtone v0.1.0 h1:SbNJx4QUx048funlaNu5Ip4ON3H8+ZLGUeNIy4/ng6c=
+github.com/charmbracelet/x/exp/charmtone v0.1.0/go.mod h1:nsExn0DGyX0lh9LwLHTn2Gg+hafdzfSXnC+QmEJTZFY=
 github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f h1:pk6gmGpCE7F3FcjaOEKYriCvpmIN4+6OS/RD0vm4uIA=
 github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f/go.mod h1:IfZAMTHB6XkZSeXUqriemErjAWCCzT0LwjKFYCZyw0I=
 github.com/charmbracelet/x/exp/ordered v0.1.0 h1:55/qLwjIh0gL0Vni+QAWk7T/qRVP6sBf+2agPBgnOFE=
@@ -554,8 +554,6 @@ github.com/mitchellh/hashstructure/v2 v2.0.2 h1:vGKWl0YJqUNxE8d+h8f6NJLcCJrgbhC4
 github.com/mitchellh/hashstructure/v2 v2.0.2/go.mod h1:MG3aRVU/N29oo/V/IhBX8GR/zz4kQkprJgF2EVszyDE=
 github.com/moloch--/asciicast v0.1.1 h1:btwwniCK9br3ys33XZ71IG/M3ZujSSCcBzsH/sieiXg=
 github.com/moloch--/asciicast v0.1.1/go.mod h1:OckO16UDLgxVLclrCnbocL1ix15Br/8Xv/caBoYq98o=
-github.com/moloch--/console v0.0.0-20260129035459-883dcb25c701 h1:6caCgDZpovjvv+eclRytFDf0GpVEnjDmoJRHpfkb42E=
-github.com/moloch--/console v0.0.0-20260129035459-883dcb25c701/go.mod h1:UdqyqqCSnPu3Zc8Q3kpDszrq1hcyBHsG17hlWlRJmWI=
 github.com/moloch--/console v0.0.0-20261002031128-9c7d5fba75f5 h1:BwamAdS8GG5tsxKisLphOOC5RVmTcy8Ixf+oGyhh/Jc=
 github.com/moloch--/console v0.0.0-20261002031128-9c7d5fba75f5/go.mod h1:UdqyqqCSnPu3Zc8Q3kpDszrq1hcyBHsG17hlWlRJmWI=
 github.com/moloch--/go-keystone v0.0.2 h1:xThbYs45CSzoDUz5kBZxAyTPIpK3t5M7NB1x+NTTRL8=
