@@ -131,6 +131,9 @@ func HTTPStartSession(address string, pathPrefix string, opts *HTTPOptions) (*Sl
 	var err error
 	if !opts.ForceHTTP {
 		client = httpsClient(address, opts)
+		if client == nil {
+			return nil, errors.New("failed to initialize HTTPS client")
+		}
 		client.Options = opts
 		client.PathPrefix = pathPrefix
 		err = client.SessionInit()
@@ -152,6 +155,9 @@ func HTTPStartSession(address string, pathPrefix string, opts *HTTPOptions) (*Sl
 		}
 
 		client = httpClient(address, opts) // Fallback to insecure HTTP
+		if client == nil {
+			return nil, errors.New("failed to initialize HTTP client")
+		}
 		client.Options = opts
 		client.PathPrefix = pathPrefix
 		err = client.SessionInit()

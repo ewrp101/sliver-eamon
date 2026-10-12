@@ -215,6 +215,19 @@ func checkImplantConfig(config *clientpb.HTTPC2ImplantConfig) error {
 		return ErrMissingExtensions
 	}
 
+	// 至少需要一个文件段:implant 的 randomPath() 会执行
+	// filenames[Intn(len(filenames))],文件段为空时会在运行时 panic。
+	// path 段是可选的(见 randomPath)。
+	fileSegmentCount := 0
+	for _, segment := range config.PathSegments {
+		if segment.IsFile {
+			fileSegmentCount++
+		}
+	}
+	if fileSegmentCount < 1 {
+		return ErrMissingFiles
+	}
+
 	/*
 		User agent
 

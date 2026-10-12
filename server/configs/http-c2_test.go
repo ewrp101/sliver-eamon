@@ -66,6 +66,9 @@ func TestCheckHTTPC2ConfigDefaultsHeaderProbability(t *testing.T) {
 				{Name: "complete-header", Value: "c", Probability: 50},
 			},
 			Extensions: []string{"js", "php"},
+			PathSegments: []*clientpb.HTTPC2PathSegment{
+				{IsFile: true, Value: "index"},
+			},
 		},
 	}
 
@@ -179,5 +182,22 @@ func TestCheckTLSClientHelloConfigIllegalBacktick(t *testing.T) {
 	}
 	if err := checkTLSClientHelloConfig(config); !errors.Is(err, ErrTLSIllegalCharacters) {
 		t.Fatalf("expected ErrTLSIllegalCharacters, got %v", err)
+	}
+}
+
+// TestCheckImplantConfigRequiresFileSegment 回归测试:没有文件段的 profile 会
+// 让 implant 的 randomPath() 对空切片取 Intn 而 panic,必须在保存时拒绝。
+func TestCheckImplantConfigRequiresFileSegment(t *testing.T) {
+	config := &clientpb.HTTPC2ImplantConfig{
+		Extensions:   []string{"js"},
+		PathSegments: []*clientpb.HTTPC2PathSegment{{IsFile: false, Value: "api"}},
+	}
+	if err := checkImplantConfig(config); !errors.Is(err, ErrMissingFiles) {
+		t.Fatalf("expected ErrMissingFiles for paths-only profile, got %v", err)
+	}
+
+	config.PathSegments = append(config.PathSegments, &clientpb.HTTPC2PathSegment{IsFile: true, Value: "index"})
+	if err := checkImplantConfig(config); err != nil {
+		t.Fatalf("expected profile with a file segment to pass, got %v", err)
 	}
 }

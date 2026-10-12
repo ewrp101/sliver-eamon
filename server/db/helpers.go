@@ -433,9 +433,20 @@ func HTTPC2ConfigUpdate(newConf *clientpb.HTTPC2Config, oldConf *clientpb.HTTPC2
 		return err.Error
 	}
 
-	err = Session().Where(&models.ImplantConfig{
-		ID: clientID,
-	}).Updates(c2Config.ImplantConfig)
+	err = Session().Model(&models.HttpC2ImplantConfig{}).
+		Where("id = ?", clientID).
+		Updates(c2Config.ImplantConfig)
+	if err.Error != nil {
+		return err.Error
+	}
+
+	// 上面的 Updates(struct) 会跳过零值字段。TLS/HTTP 指纹这些开关与字符串一旦
+	// 被清空(如 tls_enabled=false、清空 http_header_order),零值不会落库,导致
+	// overwrite 后旧配置仍然生效。这里用显式 Select 强制覆盖这些列。
+	err = Session().Model(&models.HttpC2ImplantConfig{}).
+		Where("id = ?", clientID).
+		Select("TLSEnabled", "TLSClientHelloID", "TLSCustomSpecJSON", "TLSAlpnOverride", "HttpHeaderOrder", "HttpSuppressHeaders").
+		Updates(c2Config.ImplantConfig)
 	if err.Error != nil {
 		return err.Error
 	}

