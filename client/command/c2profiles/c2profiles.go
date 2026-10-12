@@ -242,22 +242,25 @@ func GenerateC2ProfileCmd(cmd *cobra.Command, con *console.SliverClient, args []
 // convert protobuf to json
 func C2ConfigToJSON(profileName string, profile *clientpb.HTTPC2Config) (*assets.HTTPC2Config, error) {
 	implantConfig := assets.HTTPC2ImplantConfig{
-		UserAgent:          profile.ImplantConfig.UserAgent,
-		ChromeBaseVersion:  int(profile.ImplantConfig.ChromeBaseVersion),
-		MacOSVersion:       profile.ImplantConfig.MacOSVersion,
-		NonceQueryArgChars: profile.ImplantConfig.NonceQueryArgChars,
-		NonceQueryLength:   int(profile.ImplantConfig.NonceQueryLength),
-		NonceMode:          profile.ImplantConfig.NonceMode,
-		MaxFileGen:         int(profile.ImplantConfig.MaxFileGen),
-		MinFileGen:         int(profile.ImplantConfig.MinFileGen),
-		MaxPathGen:         int(profile.ImplantConfig.MaxPathGen),
-		MinPathGen:         int(profile.ImplantConfig.MinPathGen),
-		MaxPathLength:      int(profile.ImplantConfig.MaxPathLength),
-		MinPathLength:      int(profile.ImplantConfig.MinPathLength),
-		Extensions:         profile.ImplantConfig.Extensions,
-		TLSEnabled:         profile.ImplantConfig.TlsEnabled,
-		TLSClientHelloID:   profile.ImplantConfig.TlsClientHelloID,
-		TLSCustomSpecJSON:  profile.ImplantConfig.TlsCustomSpecJSON,
+		UserAgent:           profile.ImplantConfig.UserAgent,
+		ChromeBaseVersion:   int(profile.ImplantConfig.ChromeBaseVersion),
+		MacOSVersion:        profile.ImplantConfig.MacOSVersion,
+		NonceQueryArgChars:  profile.ImplantConfig.NonceQueryArgChars,
+		NonceQueryLength:    int(profile.ImplantConfig.NonceQueryLength),
+		NonceMode:           profile.ImplantConfig.NonceMode,
+		MaxFileGen:          int(profile.ImplantConfig.MaxFileGen),
+		MinFileGen:          int(profile.ImplantConfig.MinFileGen),
+		MaxPathGen:          int(profile.ImplantConfig.MaxPathGen),
+		MinPathGen:          int(profile.ImplantConfig.MinPathGen),
+		MaxPathLength:       int(profile.ImplantConfig.MaxPathLength),
+		MinPathLength:       int(profile.ImplantConfig.MinPathLength),
+		Extensions:          profile.ImplantConfig.Extensions,
+		TLSEnabled:          profile.ImplantConfig.TlsEnabled,
+		TLSClientHelloID:    profile.ImplantConfig.TlsClientHelloID,
+		TLSCustomSpecJSON:   profile.ImplantConfig.TlsCustomSpecJSON,
+		TLSAlpn:             profile.ImplantConfig.TlsAlpnOverride,
+		HTTPHeaderOrder:     profile.ImplantConfig.HttpHeaderOrder,
+		HTTPSuppressHeaders: profile.ImplantConfig.HttpSuppressHeaders,
 	}
 
 	var headers []assets.NameValueProbability
@@ -367,25 +370,28 @@ func C2ConfigToProtobuf(profileName string, config *assets.HTTPC2Config) *client
 	}
 
 	implantConfig := &clientpb.HTTPC2ImplantConfig{
-		UserAgent:          config.ImplantConfig.UserAgent,
-		ChromeBaseVersion:  int32(config.ImplantConfig.ChromeBaseVersion),
-		MacOSVersion:       config.ImplantConfig.MacOSVersion,
-		NonceQueryArgChars: config.ImplantConfig.NonceQueryArgChars,
-		NonceQueryLength:   int32(config.ImplantConfig.NonceQueryLength),
-		NonceMode:          config.ImplantConfig.NonceMode,
-		ExtraURLParameters: httpC2UrlParameters,
-		Headers:            httpC2Headers,
-		MaxFileGen:         int32(config.ImplantConfig.MaxFileGen),
-		MinFileGen:         int32(config.ImplantConfig.MinFileGen),
-		MaxPathGen:         int32(config.ImplantConfig.MaxPathGen),
-		MinPathGen:         int32(config.ImplantConfig.MinPathGen),
-		MaxPathLength:      int32(config.ImplantConfig.MaxPathLength),
-		MinPathLength:      int32(config.ImplantConfig.MinPathLength),
-		Extensions:         config.ImplantConfig.Extensions,
-		PathSegments:       pathSegments,
-		TlsEnabled:         config.ImplantConfig.TLSEnabled,
-		TlsClientHelloID:   config.ImplantConfig.TLSClientHelloID,
-		TlsCustomSpecJSON:  config.ImplantConfig.TLSCustomSpecJSON,
+		UserAgent:           config.ImplantConfig.UserAgent,
+		ChromeBaseVersion:   int32(config.ImplantConfig.ChromeBaseVersion),
+		MacOSVersion:        config.ImplantConfig.MacOSVersion,
+		NonceQueryArgChars:  config.ImplantConfig.NonceQueryArgChars,
+		NonceQueryLength:    int32(config.ImplantConfig.NonceQueryLength),
+		NonceMode:           config.ImplantConfig.NonceMode,
+		ExtraURLParameters:  httpC2UrlParameters,
+		Headers:             httpC2Headers,
+		MaxFileGen:          int32(config.ImplantConfig.MaxFileGen),
+		MinFileGen:          int32(config.ImplantConfig.MinFileGen),
+		MaxPathGen:          int32(config.ImplantConfig.MaxPathGen),
+		MinPathGen:          int32(config.ImplantConfig.MinPathGen),
+		MaxPathLength:       int32(config.ImplantConfig.MaxPathLength),
+		MinPathLength:       int32(config.ImplantConfig.MinPathLength),
+		Extensions:          config.ImplantConfig.Extensions,
+		PathSegments:        pathSegments,
+		TlsEnabled:          config.ImplantConfig.TLSEnabled,
+		TlsClientHelloID:    config.ImplantConfig.TLSClientHelloID,
+		TlsCustomSpecJSON:   config.ImplantConfig.TLSCustomSpecJSON,
+		TlsAlpnOverride:     config.ImplantConfig.TLSAlpn,
+		HttpHeaderOrder:     config.ImplantConfig.HTTPHeaderOrder,
+		HttpSuppressHeaders: config.ImplantConfig.HTTPSuppressHeaders,
 	}
 
 	// Server Config
@@ -552,6 +558,24 @@ func PrintC2Profiles(profile *clientpb.HTTPC2Config, con *console.SliverClient) 
 		tw.AppendRow(table.Row{
 			"TLS fingerprint",
 			"disabled (native Go crypto/tls)",
+		})
+	}
+	if profile.ImplantConfig.TlsEnabled && profile.ImplantConfig.TlsAlpnOverride != "" {
+		tw.AppendRow(table.Row{
+			"TLS ALPN override",
+			profile.ImplantConfig.TlsAlpnOverride,
+		})
+	}
+	if profile.ImplantConfig.HttpHeaderOrder != "" {
+		tw.AppendRow(table.Row{
+			"HTTP header order",
+			profile.ImplantConfig.HttpHeaderOrder,
+		})
+	}
+	if profile.ImplantConfig.HttpSuppressHeaders != "" {
+		tw.AppendRow(table.Row{
+			"HTTP suppressed headers",
+			profile.ImplantConfig.HttpSuppressHeaders,
 		})
 	}
 

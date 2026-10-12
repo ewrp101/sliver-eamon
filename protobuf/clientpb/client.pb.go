@@ -10496,8 +10496,28 @@ type HTTPC2ImplantConfig struct {
 	// Tier 2: raw uTLS ClientHelloSpec JSON (dicttls names, extension order preserved).
 	// When non-empty it overrides TlsClientHelloID via HelloCustom + ApplyPreset.
 	TlsCustomSpecJSON string `protobuf:"bytes,22,opt,name=TlsCustomSpecJSON,proto3" json:"TlsCustomSpecJSON,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Optional comma-separated ALPN protocol list (RFC 7301 tokens), e.g. "http/1.1".
+	// Rewrites the ALPN extension VALUES of the resolved preset/spec. JA3 is unaffected
+	// (it hashes extension IDs, not values); JA4 reflects the new ALPN. Use to keep the
+	// implant (HTTP/1.1 only under uTLS) compatible with TLS-terminating relays/CDNs
+	// that would otherwise negotiate h2. Empty = keep preset/spec default ALPN.
+	TlsAlpnOverride string `protobuf:"bytes,23,opt,name=TlsAlpnOverride,proto3" json:"TlsAlpnOverride,omitempty"`
+	// [ HTTP/1.1 request-layer fingerprint (JA4H) ]
+	// HttpHeaderOrder is a comma-separated header-name list defining the exact wire
+	// order of the request header block (case-insensitive), e.g.
+	// "Host,Connection,Content-Length,sec-ch-ua,sec-ch-ua-mobile,sec-ch-ua-platform,
+	//
+	//	Upgrade-Insecure-Requests,Accept,User-Agent,Accept-Encoding,Accept-Language,Cookie".
+	//
+	// net/http serializes headers alphabetically by default; this rewrites the header
+	// block on the wire before sending. Headers not listed are appended in Go's order.
+	// Empty = no rewrite (zero behavior change).
+	HttpHeaderOrder string `protobuf:"bytes,24,opt,name=HttpHeaderOrder,proto3" json:"HttpHeaderOrder,omitempty"`
+	// HttpSuppressHeaders is a comma-separated list of header names to remove from the
+	// outbound request (e.g. Go-injected "Accept-Encoding"). Empty = no suppression.
+	HttpSuppressHeaders string `protobuf:"bytes,25,opt,name=HttpSuppressHeaders,proto3" json:"HttpSuppressHeaders,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *HTTPC2ImplantConfig) Reset() {
@@ -10666,6 +10686,27 @@ func (x *HTTPC2ImplantConfig) GetTlsClientHelloID() string {
 func (x *HTTPC2ImplantConfig) GetTlsCustomSpecJSON() string {
 	if x != nil {
 		return x.TlsCustomSpecJSON
+	}
+	return ""
+}
+
+func (x *HTTPC2ImplantConfig) GetTlsAlpnOverride() string {
+	if x != nil {
+		return x.TlsAlpnOverride
+	}
+	return ""
+}
+
+func (x *HTTPC2ImplantConfig) GetHttpHeaderOrder() string {
+	if x != nil {
+		return x.HttpHeaderOrder
+	}
+	return ""
+}
+
+func (x *HTTPC2ImplantConfig) GetHttpSuppressHeaders() string {
+	if x != nil {
+		return x.HttpSuppressHeaders
 	}
 	return ""
 }
@@ -17461,7 +17502,7 @@ const file_clientpb_client_proto_rawDesc = "" +
 	"\x02ID\x18\x01 \x01(\tR\x02ID\x122\n" +
 	"\x14RandomVersionHeaders\x18\x02 \x01(\bR\x14RandomVersionHeaders\x120\n" +
 	"\aHeaders\x18\x03 \x03(\v2\x16.clientpb.HTTPC2HeaderR\aHeaders\x120\n" +
-	"\aCookies\x18\x04 \x03(\v2\x16.clientpb.HTTPC2CookieR\aCookies\"\xb6\x06\n" +
+	"\aCookies\x18\x04 \x03(\v2\x16.clientpb.HTTPC2CookieR\aCookies\"\xbc\a\n" +
 	"\x13HTTPC2ImplantConfig\x12\x0e\n" +
 	"\x02ID\x18\x01 \x01(\tR\x02ID\x12\x1c\n" +
 	"\tUserAgent\x18\x02 \x01(\tR\tUserAgent\x12,\n" +
@@ -17495,7 +17536,10 @@ const file_clientpb_client_proto_rawDesc = "" +
 	"TlsEnabled\x18\x14 \x01(\bR\n" +
 	"TlsEnabled\x12*\n" +
 	"\x10TlsClientHelloID\x18\x15 \x01(\tR\x10TlsClientHelloID\x12,\n" +
-	"\x11TlsCustomSpecJSON\x18\x16 \x01(\tR\x11TlsCustomSpecJSON\"2\n" +
+	"\x11TlsCustomSpecJSON\x18\x16 \x01(\tR\x11TlsCustomSpecJSON\x12(\n" +
+	"\x0fTlsAlpnOverride\x18\x17 \x01(\tR\x0fTlsAlpnOverride\x12(\n" +
+	"\x0fHttpHeaderOrder\x18\x18 \x01(\tR\x0fHttpHeaderOrder\x120\n" +
+	"\x13HttpSuppressHeaders\x18\x19 \x01(\tR\x13HttpSuppressHeaders\"2\n" +
 	"\fHTTPC2Cookie\x12\x0e\n" +
 	"\x02ID\x18\x01 \x01(\tR\x02ID\x12\x12\n" +
 	"\x04Name\x18\x02 \x01(\tR\x04Name\"\x82\x01\n" +

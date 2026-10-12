@@ -128,6 +128,11 @@ type HttpC2ImplantConfig struct {
 	TLSEnabled        bool
 	TLSClientHelloID  string
 	TLSCustomSpecJSON string `gorm:"type:text"` // 自定义 spec 可达数 KB,避免 varchar 截断
+	TLSAlpnOverride   string
+
+	// [ HTTP 请求层指纹 (JA4H) ]
+	HttpHeaderOrder     string `gorm:"type:text"`
+	HttpSuppressHeaders string `gorm:"type:text"`
 }
 
 func (h *HttpC2ImplantConfig) BeforeCreate(tx *gorm.DB) (err error) {
@@ -149,26 +154,29 @@ func (h *HttpC2ImplantConfig) ToProtobuf() *clientpb.HTTPC2ImplantConfig {
 		pathSegments[i] = segment.ToProtobuf()
 	}
 	return &clientpb.HTTPC2ImplantConfig{
-		ID:                 h.ID.String(),
-		UserAgent:          h.UserAgent,
-		ChromeBaseVersion:  h.ChromeBaseVersion,
-		MacOSVersion:       h.MacOSVersion,
-		NonceQueryArgChars: h.NonceQueryArgChars,
-		ExtraURLParameters: params,
-		Headers:            headers,
-		MaxFileGen:         h.MaxFileGen,
-		MinFileGen:         h.MinFileGen,
-		MaxPathGen:         h.MaxPathGen,
-		MinPathGen:         h.MinPathGen,
-		MaxPathLength:      h.MaxPathLength,
-		MinPathLength:      h.MinPathLength,
-		Extensions:         strings.Split(h.Extensions, ","),
-		PathSegments:       pathSegments,
-		NonceQueryLength:   h.NonceQueryLength,
-		NonceMode:          h.NonceMode,
-		TlsEnabled:         h.TLSEnabled,
-		TlsClientHelloID:   h.TLSClientHelloID,
-		TlsCustomSpecJSON:  h.TLSCustomSpecJSON,
+		ID:                  h.ID.String(),
+		UserAgent:           h.UserAgent,
+		ChromeBaseVersion:   h.ChromeBaseVersion,
+		MacOSVersion:        h.MacOSVersion,
+		NonceQueryArgChars:  h.NonceQueryArgChars,
+		ExtraURLParameters:  params,
+		Headers:             headers,
+		MaxFileGen:          h.MaxFileGen,
+		MinFileGen:          h.MinFileGen,
+		MaxPathGen:          h.MaxPathGen,
+		MinPathGen:          h.MinPathGen,
+		MaxPathLength:       h.MaxPathLength,
+		MinPathLength:       h.MinPathLength,
+		Extensions:          strings.Split(h.Extensions, ","),
+		PathSegments:        pathSegments,
+		NonceQueryLength:    h.NonceQueryLength,
+		NonceMode:           h.NonceMode,
+		TlsEnabled:          h.TLSEnabled,
+		TlsClientHelloID:    h.TLSClientHelloID,
+		TlsCustomSpecJSON:   h.TLSCustomSpecJSON,
+		TlsAlpnOverride:     h.TLSAlpnOverride,
+		HttpHeaderOrder:     h.HttpHeaderOrder,
+		HttpSuppressHeaders: h.HttpSuppressHeaders,
 	}
 }
 
@@ -330,25 +338,28 @@ func HTTPC2ConfigFromProtobuf(pbHttpC2Config *clientpb.HTTPC2Config) *HttpC2Conf
 	}
 
 	cfg.ImplantConfig = HttpC2ImplantConfig{
-		UserAgent:          pbHttpC2Config.ImplantConfig.UserAgent,
-		ChromeBaseVersion:  pbHttpC2Config.ImplantConfig.ChromeBaseVersion,
-		MacOSVersion:       pbHttpC2Config.ImplantConfig.MacOSVersion,
-		NonceQueryArgChars: pbHttpC2Config.ImplantConfig.NonceQueryArgChars,
-		ExtraURLParameters: params,
-		Headers:            implantHeaders,
-		MaxFileGen:         pbHttpC2Config.ImplantConfig.MaxFileGen,
-		MinFileGen:         pbHttpC2Config.ImplantConfig.MinFileGen,
-		MaxPathGen:         pbHttpC2Config.ImplantConfig.MaxPathGen,
-		MinPathGen:         pbHttpC2Config.ImplantConfig.MinPathGen,
-		MaxPathLength:      pbHttpC2Config.ImplantConfig.MaxPathLength,
-		MinPathLength:      pbHttpC2Config.ImplantConfig.MinPathLength,
-		Extensions:         strings.Join(pbHttpC2Config.ImplantConfig.Extensions, ","),
-		PathSegments:       pathSegments,
-		NonceQueryLength:   pbHttpC2Config.ImplantConfig.NonceQueryLength,
-		NonceMode:          pbHttpC2Config.ImplantConfig.NonceMode,
-		TLSEnabled:         pbHttpC2Config.ImplantConfig.TlsEnabled,
-		TLSClientHelloID:   pbHttpC2Config.ImplantConfig.TlsClientHelloID,
-		TLSCustomSpecJSON:  pbHttpC2Config.ImplantConfig.TlsCustomSpecJSON,
+		UserAgent:           pbHttpC2Config.ImplantConfig.UserAgent,
+		ChromeBaseVersion:   pbHttpC2Config.ImplantConfig.ChromeBaseVersion,
+		MacOSVersion:        pbHttpC2Config.ImplantConfig.MacOSVersion,
+		NonceQueryArgChars:  pbHttpC2Config.ImplantConfig.NonceQueryArgChars,
+		ExtraURLParameters:  params,
+		Headers:             implantHeaders,
+		MaxFileGen:          pbHttpC2Config.ImplantConfig.MaxFileGen,
+		MinFileGen:          pbHttpC2Config.ImplantConfig.MinFileGen,
+		MaxPathGen:          pbHttpC2Config.ImplantConfig.MaxPathGen,
+		MinPathGen:          pbHttpC2Config.ImplantConfig.MinPathGen,
+		MaxPathLength:       pbHttpC2Config.ImplantConfig.MaxPathLength,
+		MinPathLength:       pbHttpC2Config.ImplantConfig.MinPathLength,
+		Extensions:          strings.Join(pbHttpC2Config.ImplantConfig.Extensions, ","),
+		PathSegments:        pathSegments,
+		NonceQueryLength:    pbHttpC2Config.ImplantConfig.NonceQueryLength,
+		NonceMode:           pbHttpC2Config.ImplantConfig.NonceMode,
+		TLSEnabled:          pbHttpC2Config.ImplantConfig.TlsEnabled,
+		TLSClientHelloID:    pbHttpC2Config.ImplantConfig.TlsClientHelloID,
+		TLSCustomSpecJSON:   pbHttpC2Config.ImplantConfig.TlsCustomSpecJSON,
+		TLSAlpnOverride:     pbHttpC2Config.ImplantConfig.TlsAlpnOverride,
+		HttpHeaderOrder:     pbHttpC2Config.ImplantConfig.HttpHeaderOrder,
+		HttpSuppressHeaders: pbHttpC2Config.ImplantConfig.HttpSuppressHeaders,
 	}
 
 	// C2 Config
@@ -383,6 +394,10 @@ func RandomizeImplantConfig(h *clientpb.HTTPC2ImplantConfig, goos string, goarch
 		TlsEnabled:        h.TlsEnabled,
 		TlsClientHelloID:  h.TlsClientHelloID,
 		TlsCustomSpecJSON: h.TlsCustomSpecJSON,
+		TlsAlpnOverride:   h.TlsAlpnOverride,
+		// HTTP 层指纹字段同样必须透传
+		HttpHeaderOrder:     h.HttpHeaderOrder,
+		HttpSuppressHeaders: h.HttpSuppressHeaders,
 	}
 }
 

