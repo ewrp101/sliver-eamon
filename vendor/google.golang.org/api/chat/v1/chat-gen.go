@@ -191,11 +191,11 @@ const (
 	// View members in Google Chat conversations.
 	ChatMembershipsReadonlyScope = "https://www.googleapis.com/auth/chat.memberships.readonly"
 
-	// See, compose, send, update, and delete messages as well as their message
-	// content; add, see, and delete reactions to messages.
+	// See, compose, send, update, and delete messages, their content, and attached
+	// cards; add, see, and delete reactions to messages.
 	ChatMessagesScope = "https://www.googleapis.com/auth/chat.messages"
 
-	// Compose and send messages in Google Chat
+	// Compose and send messages and attach cards
 	ChatMessagesCreateScope = "https://www.googleapis.com/auth/chat.messages.create"
 
 	// See, add, and delete reactions as well as their reaction content to messages
@@ -560,6 +560,16 @@ type AccessPermissionSettings struct {
 	DiscoverSpaceSetting *AccessPermissionSetting `json:"discoverSpaceSetting,omitempty"`
 	// JoinSpaceSetting: Optional. Access permission setting for joining the space.
 	JoinSpaceSetting *AccessPermissionSetting `json:"joinSpaceSetting,omitempty"`
+	// ViewSpaceMembershipSetting: Optional. Access permission setting for viewing
+	// space membership. Must be specified together with
+	// `PermissionSettings.view_space_membership` in the update mask and request
+	// body when updating who can view space membership. When granting view access
+	// to a target audience, you must also grant
+	// `PermissionSettings.view_space_membership` to all members in the same
+	// request. To remove an existing target audience (for example, to restrict
+	// view access to space managers or assistant managers only), specify an empty
+	// `AccessPermissionSetting` (with no `principals`).
+	ViewSpaceMembershipSetting *AccessPermissionSetting `json:"viewSpaceMembershipSetting,omitempty"`
 	// ForceSendFields is a list of field names (e.g. "DiscoverSpaceSetting") to
 	// unconditionally include in API requests. By default, fields with empty or
 	// default values are omitted from API requests. See
@@ -5416,9 +5426,11 @@ type Membership struct {
 	// Member: Optional. The Google Chat user or app the membership corresponds to.
 	// If your Chat app authenticates as a user
 	// (https://developers.google.com/workspace/chat/authenticate-authorize-chat-user),
-	// the output populates the user
+	// the output only populates the user
 	// (https://developers.google.com/workspace/chat/api/reference/rest/v1/User)
-	// `name` and `type`.
+	// `name` and `type` fields for both internal and external users, unless they
+	// are members of the space or have a prior affinity, like a direct message
+	// (DM) conversation, with the calling user.
 	Member *User `json:"member,omitempty"`
 	// Name: Identifier. Resource name of the membership, assigned by the server.
 	// Format: `spaces/{space}/members/{member}`
@@ -5796,9 +5808,11 @@ type Message struct {
 	// Sender: Output only. The user who created the message. If your Chat app
 	// authenticates as a user
 	// (https://developers.google.com/workspace/chat/authenticate-authorize-chat-user),
-	// the output populates the user
+	// the output only populates the user
 	// (https://developers.google.com/workspace/chat/api/reference/rest/v1/User)
-	// `name` and `type`.
+	// `name` and `type` fields for both internal and external users, unless they
+	// are members of the space or have a prior affinity, like a direct message
+	// (DM) conversation, with the calling user.
 	Sender *User `json:"sender,omitempty"`
 	// Silent: Output only. Whether this is a silent message. Silent messages are
 	// messages where Chat suppresses push notifications for recipients.
@@ -6169,6 +6183,17 @@ type PermissionSettings struct {
 	ToggleHistory *PermissionSetting `json:"toggleHistory,omitempty"`
 	// UseAtMentionAll: Optional. Setting for using @all in a space.
 	UseAtMentionAll *PermissionSetting `json:"useAtMentionAll,omitempty"`
+	// ViewSpaceMembership: Optional. Setting for viewing space membership. Must be
+	// specified together with
+	// `AccessPermissionSettings.view_space_membership_setting` in the update mask
+	// and request body when updating who can view space membership. When
+	// restricting view access to specific roles (for example, space managers or
+	// assistant managers only), specify the desired role permissions here and
+	// provide an empty `AccessPermissionSettings.view_space_membership_setting` in
+	// the same request. If a target audience is configured in
+	// `AccessPermissionSettings.view_space_membership_setting`, this setting must
+	// be granted to all members.
+	ViewSpaceMembership *PermissionSetting `json:"viewSpaceMembership,omitempty"`
 	// ForceSendFields is a list of field names (e.g. "ManageApps") to
 	// unconditionally include in API requests. By default, fields with empty or
 	// default values are omitted from API requests. See
@@ -6588,22 +6613,26 @@ type SearchMessagesRequest struct {
 	// filters spaces based on a partial match of their display name. Results are
 	// limited to the top five space matches. For example,
 	// `space.display_name:Project` searches for messages in the top five spaces
-	// that contain the word "Project" in their display names. - `attachment`:
-	// Supports the operator `:*` (has any) to check for the presence of
-	// attachments. If `attachment:*` is specified, only messages that have at
-	// least one attachment are returned. - `annotations.user_mentions.user.name`:
-	// The resource name of the mentioned user (`users/{user}`). Only supports `:`
-	// (has). For example: `annotations.user_mentions.user.name:"users/1234567890"
-	// returns only messages that contain a mention to the specified user.
-	// Alternatively, the alias `me` can be used to filter for messages that
-	// mention the caller user, for example:
-	// `annotations.user_mentions.user.name:users/me`. You can also use the e-mail
-	// as an alias for `{user}`, for example, `users/example@gmail.com`. For
-	// advanced filtering, the following functions are also available: -
-	// `has_link()`: Returns only messages that have at least one hyperlink in the
-	// message text. - `is_unread()`: Filters out messages that have been read by
-	// the calling user. Using the `space.display_name` filter requires that the
-	// calling credentials include one of the following authorization scopes
+	// that contain the word "Project" in their display names. -
+	// `space.space_type`: The type of the space. Only supports `=`. For example,
+	// `space.space_type="DIRECT_MESSAGE" returns only messages from direct
+	// messages. The possible values are `DIRECT_MESSAGE`, `GROUP_CHAT`, and
+	// `SPACE`. - `attachment`: Supports the operator `:*` (has any) to check for
+	// the presence of attachments. If `attachment:*` is specified, only messages
+	// that have at least one attachment are returned. -
+	// `annotations.user_mentions.user.name`: The resource name of the mentioned
+	// user (`users/{user}`). Only supports `:` (has). For example:
+	// `annotations.user_mentions.user.name:"users/1234567890" returns only
+	// messages that contain a mention to the specified user. Alternatively, the
+	// alias `me` can be used to filter for messages that mention the caller user,
+	// for example: `annotations.user_mentions.user.name:users/me`. You can also
+	// use the e-mail as an alias for `{user}`, for example,
+	// `users/example@gmail.com`. For advanced filtering, the following functions
+	// are also available: - `has_link()`: Returns only messages that have at least
+	// one hyperlink in the message text. - `is_unread()`: Filters out messages
+	// that have been read by the calling user. Using the `space.display_name` or
+	// the `space.space_type` filters requires that the calling credentials include
+	// one of the following authorization scopes
 	// (https://developers.google.com/workspace/chat/authenticate-authorize#chat-api-scopes):
 	// - `https://www.googleapis.com/auth/chat.spaces.readonly` -
 	// `https://www.googleapis.com/auth/chat.spaces` Using the `is_unread()` filter
@@ -6630,8 +6659,10 @@ type SearchMessagesRequest struct {
 	// names containing both `Project` and `Tasks`, whereas
 	// `space.display_name:Project OR space.display_name:Tasks` returns messages
 	// that are in spaces with display names containing either `Project` or `Tasks`
-	// or both. - `annotations.user_mentions.user.name` supports the operators
-	// `AND` and `OR`, but not a mix of both. For example:
+	// or both. - `space.space_type` supports only the `OR` operator, for example:
+	// `space.space_type = "DIRECT_MESSAGE" OR space.space_type = "GROUP_CHAT". -
+	// `annotations.user_mentions.user.name` supports the operators `AND` and `OR`,
+	// but not a mix of both. For example:
 	// `annotations.user_mentions.user.name:"users/1234567890" AND
 	// annotations.user_mentions.user.name:"users/0987654321" returns only
 	// messages that mentions both users, whereas
@@ -6905,11 +6936,20 @@ type SetUpSpaceRequest struct {
 	// `Space.spaceType` to `DIRECT_MESSAGE` and `Space.singleUserBotDm` to
 	// `true`).
 	Memberships []*Membership `json:"memberships,omitempty"`
-	// RequestId: Optional. A unique identifier for this request. A random UUID is
-	// recommended. Specifying an existing request ID returns the space created
-	// with that ID instead of creating a new space. Specifying an existing request
-	// ID from the same Chat app with a different authenticated user returns an
-	// error.
+	// RequestId: Optional. A unique ID for this request. A random UUID is
+	// recommended. Specifying a request ID makes the request idempotent, which
+	// ensures that multiple identical requests with the same request ID result in
+	// only a single space being created. Subsequent requests with the same request
+	// ID return the existing space and do not update the space, even if the
+	// requested details differ from the current state. To use this field
+	// effectively: - Ensure that subsequent requests are identical and use the
+	// same authentication credentials as the original request. - If a space was
+	// already created with the provided request ID, the request returns that
+	// space. Note that the returned space might not be fully populated; the API
+	// echoes the space in your request with the system-assigned resource name
+	// populated. To retrieve the latest metadata for the space, call `GetSpace`. -
+	// Reusing an existing request ID with a different authenticated user results
+	// in an error.
 	RequestId string `json:"requestId,omitempty"`
 	// Space: Required. The `Space.spaceType` field is required. To create a space,
 	// set `Space.spaceType` to `SPACE` and set `Space.displayName`. If you receive
@@ -7236,7 +7276,7 @@ func (s SpaceDataSource) MarshalJSON() ([]byte, error) {
 type SpaceDetails struct {
 	// Description: Optional. A description of the space. For example, describe the
 	// space's discussion topic, functional purpose, or participants. Supports up
-	// to 150 characters.
+	// to 4,096 characters.
 	Description string `json:"description,omitempty"`
 	// Guidelines: Optional. The space's rules, expectations, and etiquette.
 	// Supports up to 5,000 characters.
@@ -7781,18 +7821,45 @@ func (s UploadAttachmentResponse) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
-// User: A user in Google Chat. When returned as an output from a request, if
-// your Chat app authenticates as a user
+// User: If your Chat app authenticates as a user
 // (https://developers.google.com/workspace/chat/authenticate-authorize-chat-user),
-// the output for a `User` resource only populates the user's `name` and
-// `type`.
+// the output for a `User` resource (such as in the Messages and Memberships
+// APIs) only populates the `name` and `type` fields for both internal and
+// external users, unless they are members of the space or have prior affinity
+// with the calling user.
 type User struct {
-	// DisplayName: Output only. The user's display name.
+	// AvatarUrl: Output only. The user's avatar image URL. When calling the
+	// Messages and Memberships APIs with user authentication
+	// (https://developers.google.com/workspace/chat/authenticate-authorize-chat-user),
+	// this field is populated for both internal and external users for the
+	// `sender` of a message, users within `annotations` (such as user mentions),
+	// and within `Membership` resources, provided the user is a member of the
+	// space or has prior affinity with the calling user.
+	AvatarUrl string `json:"avatarUrl,omitempty"`
+	// DisplayName: Output only. The user's display name. Populated for both app
+	// authentication and user authentication. This field is always populated for
+	// requests made with app authentication
+	// (https://developers.google.com/workspace/chat/authenticate-authorize-chat-app).
+	// When calling the Messages and Memberships APIs with user authentication
+	// (https://developers.google.com/workspace/chat/authenticate-authorize-chat-user),
+	// this field is populated for both internal and external users for the
+	// `sender` of a message, users within `annotations` (such as user mentions),
+	// and within `Membership` resources, provided the user is a member of the
+	// space or has prior affinity with the calling user.
 	DisplayName string `json:"displayName,omitempty"`
 	// DomainId: Unique identifier of the user's Google Workspace domain.
 	DomainId string `json:"domainId,omitempty"`
+	// Email: Output only. The user's email address. When calling the Messages and
+	// Memberships APIs with user authentication
+	// (https://developers.google.com/workspace/chat/authenticate-authorize-chat-user),
+	// this field is populated for both internal and external users for the
+	// `sender` of a message, users within `annotations` (such as user mentions),
+	// and within `Membership` resources, provided the user is a member of the
+	// space or has prior affinity with the calling user.
+	Email string `json:"email,omitempty"`
 	// IsAnonymous: Output only. When `true`, the user is deleted or their profile
-	// is not visible.
+	// is not visible, such as when a user is mentioned in a space without being a
+	// member and without prior affinity with the calling user.
 	IsAnonymous bool `json:"isAnonymous,omitempty"`
 	// Name: Resource name for a Google Chat user. Format: `users/{user}`.
 	// `users/app` can be used as an alias for the calling app bot user. For human
@@ -7815,13 +7882,13 @@ type User struct {
 	//   "HUMAN" - Human user.
 	//   "BOT" - Chat app user.
 	Type string `json:"type,omitempty"`
-	// ForceSendFields is a list of field names (e.g. "DisplayName") to
+	// ForceSendFields is a list of field names (e.g. "AvatarUrl") to
 	// unconditionally include in API requests. By default, fields with empty or
 	// default values are omitted from API requests. See
 	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
 	// details.
 	ForceSendFields []string `json:"-"`
-	// NullFields is a list of field names (e.g. "DisplayName") to include in API
+	// NullFields is a list of field names (e.g. "AvatarUrl") to include in API
 	// requests with the JSON null value. By default, fields with empty values are
 	// omitted from API requests. See
 	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
@@ -8897,11 +8964,20 @@ func (r *SpacesService) Create(space *Space) *SpacesCreateCall {
 	return c
 }
 
-// RequestId sets the optional parameter "requestId": A unique identifier for
-// this request. A random UUID is recommended. Specifying an existing request
-// ID returns the space created with that ID instead of creating a new space.
-// Specifying an existing request ID from the same Chat app with a different
-// authenticated user returns an error.
+// RequestId sets the optional parameter "requestId": A unique ID for this
+// request. A random UUID is recommended. Specifying a request ID makes the
+// request idempotent, which ensures that multiple identical requests with the
+// same request ID result in only a single space being created. Subsequent
+// requests with the same request ID return the existing space and do not
+// update the space, even if the requested details differ from the current
+// state. To use this field effectively: - Ensure that subsequent requests are
+// identical and use the same authentication credentials as the original
+// request. - If a space was already created with the provided request ID, the
+// request returns that space. Note that the returned space might not be fully
+// populated; the API echoes the space in your request with the system-assigned
+// resource name populated. To retrieve the latest metadata for the space, call
+// `GetSpace`. - Reusing an existing request ID with a different authenticated
+// user results in an error.
 func (c *SpacesCreateCall) RequestId(requestId string) *SpacesCreateCall {
 	c.urlParams_.Set("requestId", requestId)
 	return c
@@ -9863,7 +9939,8 @@ func (r *SpacesService) Patch(name string, space *Space) *SpacesPatchCall {
 // `access_settings.access_permission_settings` is not supported with
 // `useAdminAccess`. The supported field masks include: -
 // `access_settings.access_permission_settings.discoverSpaceSetting` -
-// `access_settings.access_permission_settings.joinSpaceSetting`
+// `access_settings.access_permission_settings.joinSpaceSetting` -
+// `access_settings.access_permission_settings.viewSpaceMembershipSetting`
 // `permission_settings`: Supports changing the permission settings
 // (https://support.google.com/chat/answer/13340792) of a space. When updating
 // permission settings, you can only specify `permissionSettings` field masks;
@@ -9872,7 +9949,8 @@ func (r *SpacesService) Patch(name string, space *Space) *SpacesPatchCall {
 // `permission_settings.modifySpaceDetails` -
 // `permission_settings.toggleHistory` - `permission_settings.useAtMentionAll`
 // - `permission_settings.manageApps` - `permission_settings.manageWebhooks` -
-// `permission_settings.replyMessages`
+// `permission_settings.replyMessages` -
+// `permission_settings.viewSpaceMembership`
 func (c *SpacesPatchCall) UpdateMask(updateMask string) *SpacesPatchCall {
 	c.urlParams_.Set("updateMask", updateMask)
 	return c
@@ -11686,9 +11764,20 @@ func (c *SpacesMessagesCreateCall) MessageReplyOption(messageReplyOption string)
 	return c
 }
 
-// RequestId sets the optional parameter "requestId": A unique request ID for
-// this message. Specifying an existing request ID returns the message created
-// with that ID instead of creating a new message.
+// RequestId sets the optional parameter "requestId": A unique ID for this
+// request. A random UUID is recommended. Specifying a request ID makes the
+// request idempotent, which ensures that multiple identical requests with the
+// same request ID result in only a single message being created. Subsequent
+// requests with the same request ID return the existing message and do not
+// update the message, even if the requested details differ from the current
+// state. To use this field effectively: - Ensure that subsequent requests are
+// identical and use the same authentication credentials as the original
+// request. - If a message was already created with the provided request ID,
+// the request returns that message. Note that the returned message might not
+// be fully populated; the API echoes the message in your request with the
+// system-assigned resource names populated. To retrieve the latest metadata
+// for the message, call `GetMessage`. - Reusing an existing request ID with a
+// different authenticated user results in an error.
 func (c *SpacesMessagesCreateCall) RequestId(requestId string) *SpacesMessagesCreateCall {
 	c.urlParams_.Set("requestId", requestId)
 	return c
