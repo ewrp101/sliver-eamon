@@ -385,7 +385,7 @@ github.com/bwmarrin/discordgo
 # github.com/caarlos0/go-reddit/v3 v3.0.1
 ## explicit; go 1.17
 github.com/caarlos0/go-reddit/v3/reddit
-# github.com/carapace-sh/carapace v1.15.3
+# github.com/carapace-sh/carapace v1.16.3
 ## explicit; go 1.24
 github.com/carapace-sh/carapace
 github.com/carapace-sh/carapace/internal/cache
@@ -414,6 +414,7 @@ github.com/carapace-sh/carapace/internal/shell/xonsh
 github.com/carapace-sh/carapace/internal/shell/zsh
 github.com/carapace-sh/carapace/internal/spec
 github.com/carapace-sh/carapace/pkg/cache/key
+github.com/carapace-sh/carapace/pkg/command
 github.com/carapace-sh/carapace/pkg/execlog
 github.com/carapace-sh/carapace/pkg/match
 github.com/carapace-sh/carapace/pkg/ps
