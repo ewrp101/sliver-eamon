@@ -762,7 +762,7 @@ func httpConnect(uri *url.URL) (*Connection, error) {
 						// {{end}}
 						return
 					}
-					switch errType := err.(type) {
+					switch err.(type) {
 					case nil:
 						errCount = 0
 						if envelope != nil {
@@ -772,28 +772,18 @@ func httpConnect(uri *url.URL) (*Connection, error) {
 								return
 							}
 						}
-					case *url.Error:
+					case *url.Error, net.Error:
+						// 连接被重置 / 超时等瞬时网络错误:与 default 一致地重试到 MaxErrors
+						// 再重建会话。旧逻辑对“非超时”的网络错误会立即 return,
+						// 导致单次网络拖断就掉线重连(表现为 session 反复上下线)。
 						errCount++
-						if err, ok := errType.Err.(net.Error); ok && err.Timeout() {
-							// {{if .Config.Debug}}
-							log.Printf("timeout error #%d", errCount)
-							// {{end}}
-							if errCount < opts.MaxErrors {
-								continue
-							}
+						// {{if .Config.Debug}}
+						log.Printf("[http] transient error #%d: %#v", errCount, err)
+						// {{end}}
+						if errCount < opts.MaxErrors {
+							continue
 						}
-						return
-					case net.Error:
-						errCount++
-						if errType.Timeout() {
-							// {{if .Config.Debug}}
-							log.Printf("timeout error #%d", errCount)
-							// {{end}}
-							if errCount < opts.MaxErrors {
-								continue
-							}
-						}
-						return
+						return // Max errors exceeded
 					default:
 						errCount++
 						// {{if .Config.Debug}}
