@@ -19,6 +19,7 @@ package configs
 */
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/bishopfox/sliver/protobuf/clientpb"
@@ -81,5 +82,102 @@ func TestCheckHTTPC2ConfigDefaultsHeaderProbability(t *testing.T) {
 	}
 	if config.ImplantConfig.Headers[1].Probability != 50 {
 		t.Errorf("expected explicit probability 50 to be preserved, got %d", config.ImplantConfig.Headers[1].Probability)
+	}
+}
+
+// TestParseAlpnTokensAllowsHTTP11 回归测试:tls_alpn 允许 "http/1.1"(含 '/'),
+// 这是 uTLS 路径下与 Sliver 监听器协商所必需的值。
+func TestParseAlpnTokensAllowsHTTP11(t *testing.T) {
+	tokens, err := parseAlpnTokens("h2, http/1.1")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if len(tokens) != 2 || tokens[0] != "h2" || tokens[1] != "http/1.1" {
+		t.Fatalf("unexpected tokens: %#v", tokens)
+	}
+}
+
+func TestParseAlpnTokensRejectsInvalidToken(t *testing.T) {
+	if _, err := parseAlpnTokens("h2;rm"); !errors.Is(err, ErrTLSAlpnInvalid) {
+		t.Fatalf("expected ErrTLSAlpnInvalid, got %v", err)
+	}
+}
+
+func TestParseAlpnTokensEmpty(t *testing.T) {
+	tokens, err := parseAlpnTokens("   ")
+	if err != nil || tokens != nil {
+		t.Fatalf("expected nil tokens/nil error, got %#v / %v", tokens, err)
+	}
+}
+
+func TestCheckTLSClientHelloConfigPresetWithHTTP11Alpn(t *testing.T) {
+	config := &clientpb.HTTPC2ImplantConfig{
+		TlsEnabled:       true,
+		TlsClientHelloID: "chrome_133",
+		TlsAlpnOverride:  "http/1.1",
+	}
+	if err := checkTLSClientHelloConfig(config); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+}
+
+func TestCheckTLSClientHelloConfigRandomizedAlpnRejected(t *testing.T) {
+	config := &clientpb.HTTPC2ImplantConfig{
+		TlsEnabled:       true,
+		TlsClientHelloID: "randomized",
+		TlsAlpnOverride:  "http/1.1",
+	}
+	if err := checkTLSClientHelloConfig(config); !errors.Is(err, ErrTLSAlpnRandomized) {
+		t.Fatalf("expected ErrTLSAlpnRandomized, got %v", err)
+	}
+}
+
+func TestCheckTLSClientHelloConfigUnknownPreset(t *testing.T) {
+	config := &clientpb.HTTPC2ImplantConfig{
+		TlsEnabled:       true,
+		TlsClientHelloID: "chrome_999",
+	}
+	if err := checkTLSClientHelloConfig(config); err == nil {
+		t.Fatal("expected an error for an unknown preset")
+	}
+}
+
+func TestCheckTLSClientHelloConfigDisabledClearsTLSFields(t *testing.T) {
+	config := &clientpb.HTTPC2ImplantConfig{
+		TlsEnabled:        false,
+		TlsClientHelloID:  "chrome_133",
+		TlsCustomSpecJSON: `{"a":1}`,
+		TlsAlpnOverride:   "http/1.1",
+		HttpHeaderOrder:   "Host,User-Agent",
+	}
+	if err := checkTLSClientHelloConfig(config); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if config.TlsClientHelloID != "" || config.TlsCustomSpecJSON != "" || config.TlsAlpnOverride != "" {
+		t.Fatalf("expected TLS fields to be cleared, got %#v", config)
+	}
+	// HTTP 头层指纹独立于 TLS,必须保留
+	if config.HttpHeaderOrder != "Host,User-Agent" {
+		t.Fatalf("expected HTTP header order preserved, got %q", config.HttpHeaderOrder)
+	}
+}
+
+func TestCheckTLSClientHelloConfigInvalidHeaderOrder(t *testing.T) {
+	config := &clientpb.HTTPC2ImplantConfig{
+		TlsEnabled:      false,
+		HttpHeaderOrder: "Host,Bad Header",
+	}
+	if err := checkTLSClientHelloConfig(config); !errors.Is(err, ErrHTTPHeaderOrderInvalid) {
+		t.Fatalf("expected ErrHTTPHeaderOrderInvalid, got %v", err)
+	}
+}
+
+func TestCheckTLSClientHelloConfigIllegalBacktick(t *testing.T) {
+	config := &clientpb.HTTPC2ImplantConfig{
+		TlsEnabled:        true,
+		TlsCustomSpecJSON: "`",
+	}
+	if err := checkTLSClientHelloConfig(config); !errors.Is(err, ErrTLSIllegalCharacters) {
+		t.Fatalf("expected ErrTLSIllegalCharacters, got %v", err)
 	}
 }

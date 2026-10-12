@@ -610,11 +610,13 @@ func PrintC2Profiles(profile *clientpb.HTTPC2Config, con *console.SliverClient) 
 // "slice bounds out of range" panic，导致 c2profile 查看配置时客户端直接退出。
 func truncateForDisplay(s string) string {
 	const maxDisplayLen = 50
-	if len(s) <= maxDisplayLen {
+	// 必须在 rune 维度判断与截断:byte 维度判断 + rune 维度切片会在
+	// “字节数 > 50 但 rune 数 < 50”的多字节字符串上越界 panic。
+	runes := []rune(s)
+	if len(runes) <= maxDisplayLen {
 		return s
 	}
-	// 按 rune 截断，避免切断多字节 UTF-8 字符
-	return string([]rune(s)[:maxDisplayLen]) + "..."
+	return string(runes[:maxDisplayLen]) + "..."
 }
 
 func selectC2Profile(c2profiles []*clientpb.HTTPC2Config) (string, error) {

@@ -68,6 +68,10 @@ var (
 	// RFC 7301 ALPN protocol name / RFC 7230 header field-name(token):
 	// 可见 ASCII,排除分隔符与空格
 	tokenExp = regexp.MustCompile(`^[a-zA-Z0-9!#$%&'*+\-.^_|~]+$`)
+
+	// RFC 7301 ALPN 协议名允许使用 "/"(如 "http/1.1"),而 RFC 7230 的
+	// header token 不允许。两者不能共用同一个正则,否则 http/1.1 会被误拒。
+	alpnTokenExp = regexp.MustCompile(`^[a-zA-Z0-9!#$%&'*+\-.^_|~/]+$`)
 )
 
 // randomizedPresets - 运行时生成 spec 的预设,无法物化(J4H/ALPN 覆盖不适用)
@@ -304,7 +308,7 @@ func parseAlpnTokens(value string) ([]string, error) {
 		if token == "" {
 			continue
 		}
-		if !tokenExp.MatchString(token) {
+		if !alpnTokenExp.MatchString(token) {
 			return nil, fmt.Errorf("%w: %q", ErrTLSAlpnInvalid, token)
 		}
 		tokens = append(tokens, token)
