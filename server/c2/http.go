@@ -26,6 +26,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"net"
 	"net/http"
@@ -174,7 +175,17 @@ func (s *SliverHTTPC2) getCookieName(c2ConfigName string) string {
 		return "SESSIONID"
 	}
 	cookies := httpC2Config.ServerConfig.Cookies
-	index := util.Intn(len(cookies))
+	if len(cookies) < 1 {
+		return "SESSIONID"
+	}
+	// 同一 profile 必须始终使用同一个 cookie 名。浏览器不会在每次会话时
+	// 随机更换 session cookie 名,而 implant 的 CookieJar 是累积式的;
+	// 每次会话随机换名会让单个请求携带多个历史会话 cookie,触发会话误判
+	// (404 / 202+Max-Age=0 循环)。用 profile 名的哈希在列表里稳定选取,
+	// 既保证同一 profile 稳定,又让不同 profile 使用不同的名字。
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(c2ConfigName))
+	index := int(h.Sum32() % uint32(len(cookies)))
 	return cookies[index].Name
 }
 
@@ -870,7 +881,11 @@ func (s *SliverHTTPC2) getHTTPSession(req *http.Request) *HTTPSession {
 			select {
 			case <-httpSession.ImplantConn.Done():
 				s.HTTPSessions.RemoveIf(httpSession.ID, httpSession)
-				return nil
+				// 这个 cookie 指向已关闭的会话。必须继续尝试同一请求里的
+				// 后续 cookie —— 直接 return nil 会让一个过期 cookie 遮蔽
+				// 仍然有效的会话 cookie,导致请求被当成匿名请求,
+				// 触发 closeHandler(202+Max-Age=0)与后续 404 循环。
+				continue
 			default:
 			}
 			httpSession.ImplantConn.UpdateLastMessage()

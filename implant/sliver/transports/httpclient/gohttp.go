@@ -160,15 +160,40 @@ func NewJar() *Jar {
 // given URL (which is ignored).
 func (jar *Jar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	jar.lk.Lock()
-	jar.cookies = append(jar.cookies, cookies...)
-	jar.lk.Unlock()
+	defer jar.lk.Unlock()
+	now := time.Now()
+	for _, cookie := range cookies {
+		// 本 Jar 不区分 domain/path:同名 cookie 以最新值为准,
+		// 避免历史会话 cookie 无限堆积。
+		jar.cookies = removeCookieByName(jar.cookies, cookie.Name)
+		// 删除语义(Max-Age<0 或已过期)则不再重新加入。
+		if cookie.MaxAge < 0 || (!cookie.Expires.IsZero() && cookie.Expires.Before(now)) {
+			continue
+		}
+		jar.cookies = append(jar.cookies, cookie)
+	}
+}
+
+// removeCookieByName - 原地过滤掉指定名字的 cookie
+func removeCookieByName(cookies []*http.Cookie, name string) []*http.Cookie {
+	kept := cookies[:0]
+	for _, cookie := range cookies {
+		if cookie.Name != name {
+			kept = append(kept, cookie)
+		}
+	}
+	return kept
 }
 
 // Cookies returns the cookies to send in a request for the given URL.
 // It is up to the implementation to honor the standard cookie use
 // restrictions such as in RFC 6265 (which we do not).
 func (jar *Jar) Cookies(u *url.URL) []*http.Cookie {
-	return jar.cookies
+	jar.lk.Lock()
+	defer jar.lk.Unlock()
+	out := make([]*http.Cookie, len(jar.cookies))
+	copy(out, jar.cookies)
+	return out
 }
 
 // {{end}} -IncludeHTTP
