@@ -25,17 +25,19 @@ require (
 	github.com/carapace-sh/carapace v1.15.3
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260109001716-2fbdffcb221f
+	github.com/charmbracelet/x/exp/charmtone v0.1.0
 	github.com/cheggaaa/pb/v3 v3.1.7
 	github.com/chromedp/cdproto v0.0.0-20250803210736-d308e07a266d
 	github.com/chromedp/chromedp v0.14.1
 	github.com/ebitengine/purego v0.11.0
 	github.com/glebarez/sqlite v1.11.0
+	github.com/go-sql-driver/mysql v1.9.3
 	github.com/gofrs/uuid v4.4.0+incompatible
 	github.com/golang/protobuf v1.5.4
 	github.com/gorilla/mux v1.8.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/hashicorp/yamux v0.1.2
+	github.com/jackc/pgx/v5 v5.10.0
 	github.com/jedib0t/go-pretty/v6 v6.8.3
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
 	github.com/kbinani/screenshot v0.0.0-20250624051815-089614a94018
@@ -54,6 +56,7 @@ require (
 	github.com/openai/openai-go/v2 v2.7.1
 	github.com/reeflective/console v0.1.25
 	github.com/reeflective/readline v1.1.4
+	github.com/refraction-networking/utls v1.8.2
 	github.com/rsteube/carapace v0.50.2
 	github.com/sirupsen/logrus v1.9.4
 	github.com/sliverarmory/beignet v0.0.3
@@ -193,7 +196,6 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-redis/redis/v8 v8.11.6-0.20220405070650-99c79f7041fc // indirect
-	github.com/go-sql-driver/mysql v1.9.3 // indirect
 	github.com/go-telegram-bot-api/telegram-bot-api v4.6.4+incompatible // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
@@ -219,7 +221,6 @@ require (
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.10.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jcmturner/gofork v1.7.6 // indirect
 	github.com/jezek/xgb v1.1.1 // indirect
@@ -256,7 +257,6 @@ require (
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/plivo/plivo-go/v7 v7.60.3 // indirect
 	github.com/prometheus-community/pro-bing v0.4.0 // indirect
-	github.com/refraction-networking/utls v1.8.2
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rs/zerolog v1.35.1 // indirect
