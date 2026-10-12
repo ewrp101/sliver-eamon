@@ -1,0 +1,67 @@
+{
+  "implant_config": {
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+    "chrome_base_version": 133,
+    "macos_version": "10_15_7",
+
+    "nonce_query_args": "abcdefghijklmnopqrstuvwxyz",
+    "nonce_query_length": 1,
+    "nonce_mode": "UrlParam",
+    "url_parameters": [
+      { "name": "v", "value": "1.8.3", "probability": 100, "method": "GET" }
+    ],
+
+    "headers": [
+      { "name": "Accept", "value": "*/*", "probability": 100, "method": "" },
+      { "name": "Accept-Language", "value": "en-US,en;q=0.9", "probability": 100, "method": "" },
+      { "name": "Accept-Encoding", "value": "gzip, deflate, br, zstd", "probability": 100, "method": "" },
+      { "name": "Referer", "value": "https://REPLACE-WITH-YOUR-DOMAIN/", "probability": 100, "method": "" },
+      { "name": "sec-ch-ua", "value": "\\\"Chromium\\\";v=\\\"133\\\", \\\"Not(A:Brand\\\";v=\\\"24\\\", \\\"Google Chrome\\\";v=\\\"133\\\"", "probability": 100, "method": "" },
+      { "name": "sec-ch-ua-mobile", "value": "?0", "probability": 100, "method": "" },
+      { "name": "sec-ch-ua-platform", "value": "\\\"Windows\\\"", "probability": 100, "method": "" },
+      { "name": "Sec-Fetch-Site", "value": "same-origin", "probability": 100, "method": "" },
+      { "name": "Sec-Fetch-Mode", "value": "cors", "probability": 100, "method": "" },
+      { "name": "Sec-Fetch-Dest", "value": "empty", "probability": 100, "method": "" },
+      { "name": "Origin", "value": "https://REPLACE-WITH-YOUR-DOMAIN", "probability": 100, "method": "POST" },
+      { "name": "Content-Type", "value": "application/json; charset=UTF-8", "probability": 100, "method": "POST" }
+    ],
+
+    "max_files": 4,
+    "min_files": 2,
+    "max_paths": 4,
+    "min_paths": 2,
+    "max_path_length": 4,
+    "min_path_length": 2,
+
+    "extensions": ["", "json"],
+
+    "files": [
+      "api", "data", "config", "settings", "user", "profile", "session",
+      "auth", "token", "account", "cache", "query", "search", "list",
+      "detail", "info", "state", "status", "update", "sync", "report",
+      "metrics", "event", "log"
+    ],
+
+    "paths": [
+      "api", "v1", "v2", "assets", "static", "js", "ajax", "data",
+      "service", "services", "gateway", "web", "app", "client", "rest",
+      "graphql", "core", "internal", "public", "cdn"
+    ],
+
+    "tls_enabled": true,
+    "tls_client_hello_id": "chrome_133",
+    "tls_custom_spec_json": "",
+    "tls_alpn": "http/1.1",
+
+    "http_header_order": "Host,Connection,Content-Length,sec-ch-ua,sec-ch-ua-mobile,sec-ch-ua-platform,User-Agent,Accept,Sec-Fetch-Site,Sec-Fetch-Mode,Sec-Fetch-Dest,Referer,Origin,Content-Type,Accept-Encoding,Accept-Language,Cookie",
+    "http_suppress_headers": ""
+  },
+
+  "server_config": {
+    "random_version_headers": false,
+    "headers": [
+      { "name": "Content-Type", "value": "application/json; charset=utf-8", "probability": 100 }
+    ],
+    "cookies": ["JSESSIONID", "XSRF-TOKEN", "csrftoken", "auth_token"]
+  }
+}
