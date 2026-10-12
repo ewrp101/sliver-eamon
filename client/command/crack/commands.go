@@ -1,0 +1,266 @@
+package crack
+
+import (
+	"time"
+
+	"github.com/bishopfox/sliver/client/command/completers"
+	"github.com/rsteube/carapace"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+
+	"github.com/bishopfox/sliver/client/command/flags"
+	"github.com/bishopfox/sliver/client/command/help"
+	"github.com/bishopfox/sliver/client/console"
+	consts "github.com/bishopfox/sliver/client/constants"
+)
+
+// Commands returns the “ command and its subcommands.
+func Commands(con *console.SliverClient) []*cobra.Command {
+	crackCmd := &cobra.Command{
+		Use:     consts.CrackStr,
+		Short:   "Crack: GPU password cracking",
+		Long:    help.GetHelpFor([]string{consts.CrackStr}),
+		GroupID: consts.GenericHelpGroup,
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackCmd(cmd, con, args)
+		},
+	}
+	flags.Bind("", true, crackCmd, func(f *pflag.FlagSet) {
+		f.Int64P("timeout", "t", flags.DefaultTimeout, "grpc timeout in seconds")
+	})
+	flags.Bind("", false, crackCmd, func(f *pflag.FlagSet) {
+		bindCrackFlags(f)
+	})
+	flags.BindFlagCompletions(crackCmd, func(comp *carapace.ActionMap) {
+		(*comp)["input"] = CrackWordlistCompleter(con)
+		(*comp)["rules-file"] = CrackRulesCompleter(con)
+		(*comp)["markov-hcstat2"] = CrackHcstat2Completer(con)
+	})
+
+	crackStationsCmd := &cobra.Command{
+		Use:   consts.StationsStr,
+		Short: "Manage crackstations",
+		Long:  help.GetHelpFor([]string{consts.CrackStr, consts.StationsStr}),
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackStationsCmd(cmd, con, args)
+		},
+	}
+	flags.Bind("", false, crackStationsCmd, func(f *pflag.FlagSet) {
+		f.Bool("show-benchmarks", false, "show benchmark rates for crackstations")
+	})
+	crackCmd.AddCommand(crackStationsCmd)
+
+	crackBenchmarksCmd := &cobra.Command{
+		Use:   consts.BenchmarksStr,
+		Short: "Show cached crackstation benchmark results",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+			BenchmarksCmd(cmd, con, args)
+		},
+	}
+	flags.Bind("", false, crackBenchmarksCmd, func(f *pflag.FlagSet) {
+		f.BoolP("all", "a", false, "show every cached hash mode")
+	})
+	crackCmd.AddCommand(crackBenchmarksCmd)
+
+	crackJobsCmd := &cobra.Command{
+		Use:   "jobs",
+		Short: "List hash cracking jobs",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackJobsCmd(cmd, con, args)
+		},
+	}
+	flags.Bind("", true, crackJobsCmd, func(f *pflag.FlagSet) {
+		f.Int64P("timeout", "t", flags.DefaultTimeout, "grpc timeout in seconds")
+	})
+	crackCmd.AddCommand(crackJobsCmd)
+
+	crackTopCmd := &cobra.Command{
+		Use:   "top",
+		Short: "Monitor crack jobs and crackstations in real time",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackTopCmd(cmd, con, args)
+		},
+	}
+	flags.Bind("", false, crackTopCmd, func(f *pflag.FlagSet) {
+		f.Duration("poll-interval", time.Second, "crack job and crackstation refresh interval")
+	})
+	crackCmd.AddCommand(crackTopCmd)
+
+	crackJobCmd := &cobra.Command{
+		Use:   "job [id]",
+		Short: "Show a hash cracking job",
+		Args:  cobra.MaximumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackJobCmd(cmd, con, args)
+		},
+	}
+	flags.Bind("", true, crackJobCmd, func(f *pflag.FlagSet) {
+		f.Int64P("timeout", "t", flags.DefaultTimeout, "grpc timeout in seconds")
+	})
+	flags.Bind("", false, crackJobCmd, func(f *pflag.FlagSet) {
+		f.BoolP("watch", "w", false, "watch until the job reaches a terminal state")
+		f.Duration("poll-interval", time.Second, "job status polling interval")
+	})
+	carapace.Gen(crackJobCmd).PositionalCompletion(CrackJobIDCompleter(con).Usage("crack job ID (leave empty to select)"))
+	registerCrackJobIDCompletion(crackJobCmd, con)
+
+	crackJobCancelCmd := &cobra.Command{
+		Use:   consts.CancelStr + " [id]",
+		Short: "Cancel an active or paused hash cracking job",
+		Args:  cobra.MaximumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackJobCancelCmd(cmd, con, args)
+		},
+	}
+	carapace.Gen(crackJobCancelCmd).PositionalCompletion(crackJobIDCompleter(con, crackJobCancellable).Usage("active or paused crack job ID (leave empty to select)"))
+	registerCrackJobIDCompletionFiltered(crackJobCancelCmd, con, crackJobCancellable)
+	crackJobCmd.AddCommand(crackJobCancelCmd)
+
+	crackJobPauseCmd := &cobra.Command{
+		Use:   "pause [id]",
+		Short: "Pause an active hash cracking job",
+		Args:  cobra.MaximumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackJobPauseCmd(cmd, con, args)
+		},
+	}
+	carapace.Gen(crackJobPauseCmd).PositionalCompletion(crackJobIDCompleter(con, crackJobPausable).Usage("active crack job ID (leave empty to select)"))
+	registerCrackJobIDCompletionFiltered(crackJobPauseCmd, con, crackJobPausable)
+	crackJobCmd.AddCommand(crackJobPauseCmd)
+
+	crackJobResumeCmd := &cobra.Command{
+		Use:   "resume [id]",
+		Short: "Resume a paused hash cracking job",
+		Args:  cobra.MaximumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackJobResumeCmd(cmd, con, args)
+		},
+	}
+	carapace.Gen(crackJobResumeCmd).PositionalCompletion(crackJobIDCompleter(con, crackJobResumable).Usage("paused crack job ID (leave empty to select)"))
+	registerCrackJobIDCompletionFiltered(crackJobResumeCmd, con, crackJobResumable)
+	crackJobCmd.AddCommand(crackJobResumeCmd)
+
+	crackJobRmCmd := &cobra.Command{
+		Use:   consts.RmStr + " [id]",
+		Short: "Remove a completed, failed, or cancelled hash cracking job",
+		Args:  cobra.MaximumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackJobRmCmd(cmd, con, args)
+		},
+	}
+	carapace.Gen(crackJobRmCmd).PositionalCompletion(crackTerminalJobIDCompleter(con).Usage("terminal crack job ID (leave empty to select)"))
+	registerCrackTerminalJobIDCompletion(crackJobRmCmd, con)
+	crackJobCmd.AddCommand(crackJobRmCmd)
+	crackCmd.AddCommand(crackJobCmd)
+
+	wordlistsCmd := &cobra.Command{
+		Use:   consts.WordlistsStr,
+		Short: "Manage wordlists",
+		Long:  help.GetHelpFor([]string{consts.CrackStr, consts.WordlistsStr}),
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackWordlistsCmd(cmd, con, args)
+		},
+	}
+	crackCmd.AddCommand(wordlistsCmd)
+
+	wordlistsAddCmd := &cobra.Command{
+		Use:   consts.AddStr,
+		Short: "Add a wordlist",
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackWordlistsAddCmd(cmd, con, args)
+		},
+	}
+	flags.Bind("", false, wordlistsAddCmd, func(f *pflag.FlagSet) {
+		f.StringP("name", "n", "", "wordlist name (blank = filename)")
+	})
+	carapace.Gen(wordlistsAddCmd).PositionalCompletion(carapace.ActionFiles().Usage("path to local wordlist file"))
+	completers.RegisterLocalFilePathPositionalCompletion(wordlistsAddCmd, 0)
+	wordlistsCmd.AddCommand(wordlistsAddCmd)
+
+	wordlistsRmCmd := &cobra.Command{
+		Use:   consts.RmStr,
+		Short: "Remove a wordlist",
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackWordlistsRmCmd(cmd, con, args)
+		},
+	}
+	wordlistsCmd.AddCommand(wordlistsRmCmd)
+	carapace.Gen(wordlistsRmCmd).PositionalCompletion(CrackWordlistCompleter(con).Usage("wordlist to remove"))
+
+	rulesCmd := &cobra.Command{
+		Use:   consts.RulesStr,
+		Short: "Manage rule files",
+		Long:  help.GetHelpFor([]string{consts.CrackStr, consts.RulesStr}),
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackRulesCmd(cmd, con, args)
+		},
+	}
+	crackCmd.AddCommand(rulesCmd)
+
+	rulesAddCmd := &cobra.Command{
+		Use:   consts.AddStr,
+		Short: "Add a rules file",
+		Long:  help.GetHelpFor([]string{consts.CrackStr, consts.RulesStr, consts.AddStr}),
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackRulesAddCmd(cmd, con, args)
+		},
+	}
+	flags.Bind("", false, rulesAddCmd, func(f *pflag.FlagSet) {
+		f.StringP("name", "n", "", "rules name (blank = filename)")
+	})
+	carapace.Gen(rulesAddCmd).PositionalCompletion(carapace.ActionFiles().Usage("path to local rules file"))
+	completers.RegisterLocalFilePathPositionalCompletion(rulesAddCmd, 0)
+	rulesCmd.AddCommand(rulesAddCmd)
+
+	rulesRmCmd := &cobra.Command{
+		Use:   consts.RmStr,
+		Short: "Remove rules",
+		Long:  help.GetHelpFor([]string{consts.CrackStr, consts.RulesStr, consts.RmStr}),
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackRulesRmCmd(cmd, con, args)
+		},
+	}
+	carapace.Gen(rulesRmCmd).PositionalCompletion(CrackRulesCompleter(con).Usage("rules to remove"))
+	rulesCmd.AddCommand(rulesRmCmd)
+
+	hcstat2Cmd := &cobra.Command{
+		Use:   consts.Hcstat2Str,
+		Short: "Manage markov hcstat2 files",
+		Long:  help.GetHelpFor([]string{consts.CrackStr, consts.Hcstat2Str}),
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackHcstat2Cmd(cmd, con, args)
+		},
+	}
+	crackCmd.AddCommand(hcstat2Cmd)
+
+	hcstat2AddCmd := &cobra.Command{
+		Use:   consts.AddStr,
+		Short: "Add a hcstat2 file",
+		Long:  help.GetHelpFor([]string{consts.CrackStr, consts.Hcstat2Str, consts.AddStr}),
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackHcstat2AddCmd(cmd, con, args)
+		},
+	}
+	flags.Bind("", false, hcstat2AddCmd, func(f *pflag.FlagSet) {
+		f.StringP("name", "n", "", "hcstat2 name (blank = filename)")
+	})
+	carapace.Gen(hcstat2AddCmd).PositionalCompletion(carapace.ActionFiles().Usage("path to local hcstat2 file"))
+	completers.RegisterLocalFilePathPositionalCompletion(hcstat2AddCmd, 0)
+	hcstat2Cmd.AddCommand(hcstat2AddCmd)
+
+	hcstat2RmCmd := &cobra.Command{
+		Use:   consts.RmStr,
+		Short: "Remove hcstat2 file",
+		Long:  help.GetHelpFor([]string{consts.CrackStr, consts.Hcstat2Str, consts.RmStr}),
+		Run: func(cmd *cobra.Command, args []string) {
+			CrackHcstat2RmCmd(cmd, con, args)
+		},
+	}
+	carapace.Gen(hcstat2RmCmd).PositionalCompletion(CrackHcstat2Completer(con).Usage("hcstat2 to remove"))
+	hcstat2Cmd.AddCommand(hcstat2RmCmd)
+
+	return []*cobra.Command{crackCmd}
+}

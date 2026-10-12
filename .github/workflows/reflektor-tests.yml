@@ -1,0 +1,164 @@
+name: Reflektor Integration Test Matrix
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  darwin:
+    name: reflektor-darwin-${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            goarch: amd64
+            server_arch: amd64
+          - runner: macos-15
+            goarch: arm64
+            server_arch: arm64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download Sliver build assets
+        run: go run -mod=vendor ./util/cmd/assets
+
+      - name: Build Sliver server
+        env:
+          CGO_ENABLED: "0"
+          GOARCH: ${{ matrix.server_arch }}
+          GOOS: darwin
+        run: go build -mod=vendor -trimpath -tags go_sqlite,server -o sliver-server ./server
+
+      - name: Build Reflektor integration driver
+        env:
+          CGO_ENABLED: "0"
+          GOARCH: ${{ matrix.goarch }}
+          GOOS: darwin
+        run: go build -mod=vendor -trimpath -tags client,go_sqlite -o sliver-reflektor-e2e ./test/reflektor
+
+      - name: Load Sliver with Reflektor
+        run: >-
+          ./sliver-reflektor-e2e
+          -repo .
+          -server ./sliver-server
+          -target-os darwin
+          -target-arch ${{ matrix.goarch }}
+
+  linux-native:
+    name: reflektor-linux-${{ matrix.goarch }}-native
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            goarch: amd64
+            server_arch: amd64
+          - runner: ubuntu-24.04-arm
+            goarch: arm64
+            server_arch: arm64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download Sliver build assets
+        run: go run -mod=vendor ./util/cmd/assets
+
+      - name: Build Sliver server
+        env:
+          CGO_ENABLED: "0"
+          GOARCH: ${{ matrix.server_arch }}
+          GOOS: linux
+        run: go build -mod=vendor -trimpath -tags go_sqlite,server -o sliver-server ./server
+
+      - name: Build Reflektor integration driver
+        env:
+          CGO_ENABLED: "0"
+          GOARCH: ${{ matrix.goarch }}
+          GOOS: linux
+        run: go build -mod=vendor -trimpath -tags client,go_sqlite -o sliver-reflektor-e2e ./test/reflektor
+
+      - name: Load Sliver with Reflektor
+        run: >-
+          ./sliver-reflektor-e2e
+          -repo .
+          -server ./sliver-server
+          -target-os linux
+          -target-arch ${{ matrix.goarch }}
+
+  windows:
+    name: reflektor-windows-${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            goarch: amd64
+            server_arch: amd64
+          - runner: windows-11-arm
+            goarch: arm64
+            server_arch: amd64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download Sliver build assets
+        run: go run -mod=vendor ./util/cmd/assets
+
+      - name: Build Sliver server
+        env:
+          CGO_ENABLED: "0"
+          GOARCH: ${{ matrix.server_arch }}
+          GOOS: windows
+        run: go build -mod=vendor -trimpath -tags go_sqlite,server -o sliver-server.exe ./server
+
+      - name: Build Reflektor integration driver
+        env:
+          CGO_ENABLED: "0"
+          GOARCH: ${{ matrix.goarch }}
+          GOOS: windows
+        run: go build -mod=vendor -trimpath -tags client,go_sqlite -o sliver-reflektor-e2e.exe ./test/reflektor
+
+      - name: Load Sliver with Reflektor
+        run: >-
+          ./sliver-reflektor-e2e.exe
+          -repo .
+          -server ./sliver-server.exe
+          -target-os windows
+          -target-arch ${{ matrix.goarch }}

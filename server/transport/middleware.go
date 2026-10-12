@@ -1,0 +1,517 @@
+package transport
+
+/*
+	Sliver Implant Framework
+	Copyright (C) 2019  Bishop Fox
+
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"sync"
+
+	consts "github.com/bishopfox/sliver/client/constants"
+	"github.com/bishopfox/sliver/protobuf/clientpb"
+	"github.com/bishopfox/sliver/server/configs"
+	"github.com/bishopfox/sliver/server/core"
+	"github.com/bishopfox/sliver/server/db"
+	"github.com/bishopfox/sliver/server/db/models"
+	"github.com/bishopfox/sliver/server/log"
+	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
+	grpc_logrus "github.com/grpc-ecosystem/go-grpc-middleware/logging/logrus"
+	grpc_tags "github.com/grpc-ecosystem/go-grpc-middleware/tags"
+	"github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+)
+
+var (
+	serverConfig  = configs.GetServerConfig()
+	middlewareLog = log.NamedLogger("transport", "middleware")
+)
+
+type contextKey int
+
+const (
+	Transport contextKey = iota
+	Operator
+)
+
+// initMiddleware - Initialize middleware
+func initMiddleware(enableAuth bool) []grpc.ServerOption {
+	logrusEntry := log.NamedLogger("transport", "grpc")
+	logrusOpts := []grpc_logrus.Option{
+		grpc_logrus.WithLevels(codeToLevel),
+	}
+	grpc_logrus.ReplaceGrpcLogger(logrusEntry)
+	if enableAuth {
+		return []grpc.ServerOption{
+			grpc.ChainUnaryInterceptor(
+				grpc_auth.UnaryServerInterceptor(tokenAuthFunc),
+				permissionsUnaryServerInterceptor(),
+				auditLogUnaryServerInterceptor(),
+				grpc_tags.UnaryServerInterceptor(grpc_tags.WithFieldExtractor(grpc_tags.CodeGenRequestFieldExtractor)),
+				grpc_logrus.UnaryServerInterceptor(logrusEntry, logrusOpts...),
+				grpc_logrus.PayloadUnaryServerInterceptor(logrusEntry, deciderUnary),
+			),
+			grpc.ChainStreamInterceptor(
+				grpc_auth.StreamServerInterceptor(tokenAuthFunc),
+				permissionsStreamServerInterceptor(),
+				trackOperatorStreamInterceptor(),
+				grpc_tags.StreamServerInterceptor(grpc_tags.WithFieldExtractor(grpc_tags.CodeGenRequestFieldExtractor)),
+				grpc_logrus.StreamServerInterceptor(logrusEntry, logrusOpts...),
+				grpc_logrus.PayloadStreamServerInterceptor(logrusEntry, deciderStream),
+			),
+		}
+	} else {
+		return []grpc.ServerOption{
+			grpc.ChainUnaryInterceptor(
+				grpc_auth.UnaryServerInterceptor(serverAuthFunc),
+				auditLogUnaryServerInterceptor(),
+				grpc_tags.UnaryServerInterceptor(grpc_tags.WithFieldExtractor(grpc_tags.CodeGenRequestFieldExtractor)),
+				grpc_logrus.UnaryServerInterceptor(logrusEntry, logrusOpts...),
+				grpc_logrus.PayloadUnaryServerInterceptor(logrusEntry, deciderUnary),
+			),
+			grpc.ChainStreamInterceptor(
+				grpc_auth.StreamServerInterceptor(serverAuthFunc),
+				trackOperatorStreamInterceptor(),
+				grpc_tags.StreamServerInterceptor(grpc_tags.WithFieldExtractor(grpc_tags.CodeGenRequestFieldExtractor)),
+				grpc_logrus.StreamServerInterceptor(logrusEntry, logrusOpts...),
+				grpc_logrus.PayloadStreamServerInterceptor(logrusEntry, deciderStream),
+			),
+		}
+	}
+
+}
+
+var (
+	tokenCache   sync.Map
+	tokenCacheMu sync.RWMutex
+)
+
+// ClearTokenCache - Clear the auth token cache
+func ClearTokenCache() {
+	tokenCacheMu.Lock()
+	defer tokenCacheMu.Unlock()
+	tokenCache.Clear()
+}
+
+func serverAuthFunc(ctx context.Context) (context.Context, error) {
+	newCtx := context.WithValue(ctx, Transport, "local")
+	newCtx = context.WithValue(newCtx, Operator, "server")
+	return newCtx, nil
+}
+
+func tokenAuthFunc(ctx context.Context) (context.Context, error) {
+	mtlsLog.Debugf("Auth interceptor checking operator token ...")
+	rawToken, err := grpc_auth.AuthFromMD(ctx, "Bearer")
+	if err != nil {
+		mtlsLog.Errorf("Authentication failure: %s", err)
+		return nil, status.Error(codes.Unauthenticated, "Authentication failure")
+	}
+
+	// Check auth cache
+	digest := sha256.Sum256([]byte(rawToken))
+	token := hex.EncodeToString(digest[:])
+	newCtx := context.WithValue(ctx, Transport, "mtls")
+	// Keep lookup and insertion ordered with revocation. Otherwise an auth
+	// request can repopulate the cache after ClearTokenCache returns.
+	tokenCacheMu.RLock()
+	defer tokenCacheMu.RUnlock()
+	if op, ok := tokenCache.Load(token); ok {
+		mtlsLog.Debugf("Token in cache!")
+		newCtx = context.WithValue(newCtx, Operator, op.(*models.Operator))
+		return newCtx, nil
+	}
+	operator, err := db.OperatorByToken(token)
+	if err != nil || operator == nil {
+		mtlsLog.Errorf("Authentication failure: %v", err)
+		return nil, status.Error(codes.Unauthenticated, "Authentication failure")
+	}
+	mtlsLog.Debugf("Valid token for %s", operator.Name)
+	tokenCache.Store(token, operator)
+
+	newCtx = context.WithValue(newCtx, Operator, operator)
+	return newCtx, nil
+}
+
+var (
+	// Builder - Allowed methods
+	builderMethods = map[string]bool{
+		"/rpcpb.SliverRPC/GetVersion": true,
+
+		"/rpcpb.SliverRPC/GenerateExternalGetBuildConfig": true,
+		"/rpcpb.SliverRPC/GenerateExternalSaveBuild":      true,
+		"/rpcpb.SliverRPC/BuilderRegister":                true,
+		"/rpcpb.SliverRPC/BuilderTrigger":                 true,
+		"/rpcpb.SliverRPC/Builders":                       true,
+	}
+	// Crackstation - Allowed methods
+	crackstationMethods = map[string]bool{
+		"/rpcpb.SliverRPC/GetVersion": true,
+
+		"/rpcpb.SliverRPC/CrackstationRegister":   true,
+		"/rpcpb.SliverRPC/CrackstationTrigger":    true,
+		"/rpcpb.SliverRPC/CrackstationBenchmark":  true,
+		"/rpcpb.SliverRPC/Crackstations":          true,
+		"/rpcpb.SliverRPC/CrackTaskByID":          true,
+		"/rpcpb.SliverRPC/CrackTaskUpdate":        true,
+		"/rpcpb.SliverRPC/CrackFilesList":         true,
+		"/rpcpb.SliverRPC/CrackFileChunkDownload": true,
+	}
+)
+
+func permissionsUnaryServerInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (_ interface{}, err error) {
+		operator := ctx.Value(Operator).(*models.Operator)
+		if operator == nil {
+			return nil, status.Error(codes.Unauthenticated, "Authentication failure")
+		}
+		if operator.PermissionAll {
+			return handler(ctx, req)
+		}
+		if operator.PermissionBuilder {
+			if ok, _ := builderMethods[info.FullMethod]; ok {
+				return handler(ctx, req)
+			}
+		}
+		if operator.PermissionCrackstation {
+			if ok, _ := crackstationMethods[info.FullMethod]; ok {
+				return handler(ctx, req)
+			}
+		}
+		mtlsLog.Warnf("Permission denied for %s attempting to access %s", operator.Name, info.FullMethod)
+		return nil, status.Error(codes.PermissionDenied, "Token has insufficient permissions")
+	}
+}
+
+func permissionsStreamServerInterceptor() grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		operator := ss.Context().Value(Operator).(*models.Operator)
+		if operator == nil {
+			return status.Error(codes.Unauthenticated, "Authentication failure")
+		}
+		if operator.PermissionAll {
+			return handler(srv, ss)
+		}
+		if operator.PermissionBuilder {
+			if ok, _ := builderMethods[info.FullMethod]; ok {
+				return handler(srv, ss)
+			}
+		}
+		if operator.PermissionCrackstation {
+			if ok, _ := crackstationMethods[info.FullMethod]; ok {
+				return handler(srv, ss)
+			}
+		}
+		mtlsLog.Warnf("Permission denied for %s attempting to access %s", operator.Name, info.FullMethod)
+		return status.Error(codes.PermissionDenied, "Token has insufficient permissions")
+	}
+}
+
+func deciderUnary(_ context.Context, fullMethod string, _ interface{}) bool {
+	switch fullMethod {
+	case "/rpcpb.SliverRPC/Crack",
+		"/rpcpb.SliverRPC/CrackJobByID",
+		"/rpcpb.SliverRPC/CrackJobCancel",
+		"/rpcpb.SliverRPC/CrackJobPause",
+		"/rpcpb.SliverRPC/CrackJobResume",
+		"/rpcpb.SliverRPC/CrackJobDelete",
+		"/rpcpb.SliverRPC/CrackTop",
+		"/rpcpb.SliverRPC/CrackTaskByID",
+		"/rpcpb.SliverRPC/CrackTaskUpdate",
+		"/rpcpb.SliverRPC/CrackstationTrigger",
+		"/rpcpb.SliverRPC/CrackFileChunkUpload",
+		"/rpcpb.SliverRPC/CrackFileChunkDownload",
+		"/rpcpb.SliverRPC/Creds",
+		"/rpcpb.SliverRPC/CredsAdd",
+		"/rpcpb.SliverRPC/CredsRm",
+		"/rpcpb.SliverRPC/CredsUpdate",
+		"/rpcpb.SliverRPC/GetCredByID",
+		"/rpcpb.SliverRPC/GetCredsByHashType",
+		"/rpcpb.SliverRPC/GetPlaintextCredsByHashType",
+		"/rpcpb.SliverRPC/CredsSniffHashType",
+		"/rpcpb.SliverRPC/MonitorListConfig",
+		"/rpcpb.SliverRPC/MonitorAddConfig",
+		"/rpcpb.SliverRPC/MonitorDelConfig":
+		return false
+	}
+	return serverConfig.Logs.GRPCUnaryPayloads
+}
+
+func deciderStream(_ context.Context, fullMethod string, _ interface{}) bool {
+	if fullMethod == "/rpcpb.SliverRPC/CrackstationRegister" {
+		return false
+	}
+	return serverConfig.Logs.GRPCStreamPayloads
+}
+
+// Maps a grpc response code to a logging level
+func codeToLevel(code codes.Code) logrus.Level {
+	switch code {
+	case codes.OK:
+		return logrus.InfoLevel
+	case codes.Canceled:
+		return logrus.InfoLevel
+	case codes.Unknown:
+		return logrus.ErrorLevel
+	case codes.InvalidArgument:
+		return logrus.InfoLevel
+	case codes.DeadlineExceeded:
+		return logrus.WarnLevel
+	case codes.NotFound:
+		return logrus.InfoLevel
+	case codes.AlreadyExists:
+		return logrus.InfoLevel
+	case codes.PermissionDenied:
+		return logrus.WarnLevel
+	case codes.Unauthenticated:
+		return logrus.InfoLevel
+	case codes.ResourceExhausted:
+		return logrus.WarnLevel
+	case codes.FailedPrecondition:
+		return logrus.WarnLevel
+	case codes.Aborted:
+		return logrus.WarnLevel
+	case codes.OutOfRange:
+		return logrus.WarnLevel
+	case codes.Unimplemented:
+		return logrus.ErrorLevel
+	case codes.Internal:
+		return logrus.ErrorLevel
+	case codes.Unavailable:
+		return logrus.WarnLevel
+	case codes.DataLoss:
+		return logrus.ErrorLevel
+	default:
+		return logrus.ErrorLevel
+	}
+}
+
+type auditUnaryLogMsg struct {
+	Request  string `json:"request"`
+	Method   string `json:"method"`
+	Session  string `json:"session,omitempty"`
+	Beacon   string `json:"beacon,omitempty"`
+	RemoteIP string `json:"remote_ip"`
+	User     string `json:"user"`
+}
+
+func auditCredentialMetadata(cred *clientpb.Credential) *clientpb.Credential {
+	if cred == nil {
+		return nil
+	}
+	return &clientpb.Credential{
+		ID:             cred.ID,
+		Username:       cred.Username,
+		HashType:       cred.HashType,
+		IsCracked:      cred.IsCracked,
+		OriginHostUUID: cred.OriginHostUUID,
+		Collection:     cred.Collection,
+	}
+}
+
+func sanitizeAuditRequest(fullMethod string, req interface{}) interface{} {
+	switch fullMethod {
+	case "/rpcpb.SliverRPC/CredsAdd",
+		"/rpcpb.SliverRPC/CredsRm",
+		"/rpcpb.SliverRPC/CredsUpdate":
+		creds, ok := req.(*clientpb.Credentials)
+		if !ok || creds == nil {
+			return req
+		}
+		sanitized := &clientpb.Credentials{}
+		if creds.Credentials != nil {
+			sanitized.Credentials = make([]*clientpb.Credential, len(creds.Credentials))
+			for i, cred := range creds.Credentials {
+				sanitized.Credentials[i] = auditCredentialMetadata(cred)
+			}
+		}
+		return sanitized
+	case "/rpcpb.SliverRPC/GetCredByID",
+		"/rpcpb.SliverRPC/GetCredsByHashType",
+		"/rpcpb.SliverRPC/GetPlaintextCredsByHashType",
+		"/rpcpb.SliverRPC/CredsSniffHashType":
+		cred, ok := req.(*clientpb.Credential)
+		if !ok || cred == nil {
+			return req
+		}
+		return auditCredentialMetadata(cred)
+	case "/rpcpb.SliverRPC/MonitorAddConfig",
+		"/rpcpb.SliverRPC/MonitorDelConfig":
+		provider, ok := req.(*clientpb.MonitoringProvider)
+		if !ok || provider == nil {
+			return req
+		}
+		return &clientpb.MonitoringProvider{ID: provider.ID, Type: provider.Type}
+	case "/rpcpb.SliverRPC/CrackJobCancel",
+		"/rpcpb.SliverRPC/CrackJobPause",
+		"/rpcpb.SliverRPC/CrackJobResume",
+		"/rpcpb.SliverRPC/CrackJobDelete":
+		job, ok := req.(*clientpb.CrackJob)
+		if !ok || job == nil {
+			return req
+		}
+		return &clientpb.CrackJob{ID: job.ID}
+	case "/rpcpb.SliverRPC/Crack":
+		command, ok := req.(*clientpb.CrackCommand)
+		if !ok || command == nil {
+			return req
+		}
+		sanitized := proto.Clone(command).(*clientpb.CrackCommand)
+		message := sanitized.ProtoReflect()
+		message.Range(func(field protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
+			switch field.Kind() {
+			case protoreflect.StringKind, protoreflect.BytesKind:
+				message.Clear(field)
+			}
+			return true
+		})
+		return sanitized
+	case "/rpcpb.SliverRPC/CrackTaskByID", "/rpcpb.SliverRPC/CrackTaskUpdate":
+		task, ok := req.(*clientpb.CrackTask)
+		if !ok || task == nil {
+			return req
+		}
+		sanitized := proto.Clone(task).(*clientpb.CrackTask)
+		sanitized.LeaseToken = ""
+		sanitized.Command = nil
+		sanitized.Stdout = nil
+		sanitized.Stderr = nil
+		sanitized.LatestStatusJSON = nil
+		sanitized.RecoveredJSON = nil
+		return sanitized
+	case "/rpcpb.SliverRPC/CrackstationTrigger":
+		event, ok := req.(*clientpb.Event)
+		if !ok || event == nil || (event.EventType != consts.CrackTaskStatus && event.EventType != consts.CrackTaskCancelAck) {
+			return req
+		}
+		sanitized := proto.Clone(event).(*clientpb.Event)
+		sanitized.Data = nil
+		return sanitized
+	case "/rpcpb.SliverRPC/CrackFileChunkUpload":
+		chunk, ok := req.(*clientpb.CrackFileChunk)
+		if !ok || chunk == nil {
+			return req
+		}
+		sanitized := proto.Clone(chunk).(*clientpb.CrackFileChunk)
+		sanitized.Data = nil
+		return sanitized
+	default:
+		return req
+	}
+}
+
+func auditLogUnaryServerInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (_ interface{}, err error) {
+		rawRequest, err := json.Marshal(sanitizeAuditRequest(info.FullMethod, req))
+		if err != nil {
+			middlewareLog.Errorf("Failed to serialize %s", err)
+			return
+		}
+		session, beacon, err := getActiveTarget(rawRequest)
+		if err != nil {
+			middlewareLog.Errorf("Middleware failed to insert details: %s", err)
+		}
+
+		p, _ := peer.FromContext(ctx)
+
+		// Construct Log Message
+		msg := &auditUnaryLogMsg{
+			Request:  string(rawRequest),
+			Method:   info.FullMethod,
+			User:     getUser(p),
+			RemoteIP: p.Addr.String(),
+		}
+		if session != nil {
+			sessionJSON, _ := json.Marshal(session)
+			msg.Session = string(sessionJSON)
+		}
+		if beacon != nil {
+			beaconJSON, _ := json.Marshal(beacon)
+			msg.Beacon = string(beaconJSON)
+		}
+
+		msgData, _ := json.Marshal(msg)
+		log.AuditLogger.Info(string(msgData))
+
+		resp, err := handler(ctx, req)
+		return resp, err
+	}
+}
+
+func getUser(client *peer.Peer) string {
+	tlsAuth, ok := client.AuthInfo.(credentials.TLSInfo)
+	if !ok {
+		return ""
+	}
+	if len(tlsAuth.State.VerifiedChains) == 0 || len(tlsAuth.State.VerifiedChains[0]) == 0 {
+		return ""
+	}
+	if tlsAuth.State.VerifiedChains[0][0].Subject.CommonName != "" {
+		return tlsAuth.State.VerifiedChains[0][0].Subject.CommonName
+	}
+	return ""
+}
+
+func getActiveTarget(rawRequest []byte) (*clientpb.Session, *clientpb.Beacon, error) {
+
+	var activeBeacon *clientpb.Beacon
+	var activeSession *clientpb.Session
+
+	var request map[string]interface{}
+	err := json.Unmarshal(rawRequest, &request)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// RPC is not a session/beacon request
+	if _, ok := request["Request"]; !ok {
+		return nil, nil, nil
+	}
+
+	rpcRequest := request["Request"].(map[string]interface{})
+
+	if rawBeaconID, ok := rpcRequest["BeaconID"]; ok {
+		beaconID := rawBeaconID.(string)
+		middlewareLog.Debugf("Found Beacon ID: %s", beaconID)
+		beacon, err := db.BeaconByID(beaconID)
+		middlewareLog.Infof("query complete")
+		if err != nil {
+			middlewareLog.Errorf("Failed to get beacon %s: %s", beaconID, err)
+		} else if beacon != nil {
+			activeBeacon = beacon.ToProtobuf()
+		}
+	}
+
+	if rawSessionID, ok := rpcRequest["SessionID"]; ok {
+		sessionID := rawSessionID.(string)
+		middlewareLog.Debugf("Found Session ID: %s", sessionID)
+		session := core.Sessions.Get(sessionID)
+		if session != nil {
+			activeSession = session.ToProtobuf()
+		}
+	}
+
+	return activeSession, activeBeacon, nil
+}

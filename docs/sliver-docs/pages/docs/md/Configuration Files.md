@@ -1,0 +1,165 @@
+### General Server Configuration
+
+The Sliver server configuration file is located in the `configs` sub-directory of [`SLIVER_ROOT_DIR`](/docs?name=Environment+Variables); by default this is `~/.sliver/configs/server.yaml`.
+
+If no configuration file exists, a default YAML configuration is generated and written to disk on startup. If a legacy `server.json` file exists, Sliver reads it, writes `server.yaml`, and renames the old file to `.server.json-old`.
+
+AI configuration is stored separately in `configs/ai.yaml`. A legacy inline `ai` block is migrated only when that file does not already exist.
+
+#### Default Server Config
+
+```yaml
+daemon_mode: false
+daemon:
+    host: ""
+    port: 31337
+    tailscale: false
+    enable_wg: false
+logs:
+    level: 4
+    grpc_unary_payloads: false
+    grpc_stream_payloads: false
+    tls_key_logger: false
+    max_size_mb: 50
+    max_backups: 20
+    max_age_days: 90
+    compress: true
+grpc:
+    keepalive:
+        min_time_seconds: 30
+        permit_without_stream: true
+watch_tower: null
+go_proxy: ""
+http_default:
+    headers:
+        - method: GET
+          name: Cache-Control
+          value: no-store, no-cache, must-revalidate
+          probability: 100
+notifications:
+    enabled: false
+    services: {}
+cc: {}
+cxx: {}
+```
+
+#### Configuration Options
+
+- `daemon_mode` - Enable [daemon mode](/docs?name=Daemon+Mode).
+- `daemon` - Options for daemon mode.
+  - `host` - Interface to bind the daemon listener to. Empty string means all interfaces.
+  - `port` - Listen port for the multiplayer listener.
+  - `tailscale` - Enable Tailscale for daemon listener setup. When enabled, Sliver does not wrap multiplayer in its own WireGuard layer.
+  - `enable_wg` - Wrap multiplayer in WireGuard. If omitted or false, multiplayer is exposed directly over mTLS.
+    - The legacy `disable_wg` field from the withdrawn WireGuard-by-default release does not enable WireGuard and is normalized to `enable_wg: false`. Set `enable_wg: true` explicitly to opt in.
+- `logs` - Server logging options.
+  - `level` - `logrus` level (`0`-`6`, clamped by Sliver). `4` is `INFO`, `5` is `DEBUG`, `6` is `TRACE`.
+  - `grpc_unary_payloads` - Log gRPC unary payloads.
+  - `grpc_stream_payloads` - Log gRPC streaming payloads.
+  - `tls_key_logger` - Enable TLS key logging (for debugging/traffic analysis only; sensitive).
+  - `max_size_mb`, `max_backups`, `max_age_days` - Log rotation size in MB, backup count, and maximum backup age in days (defaults: `50`, `20`, `90`).
+  - `compress` - Compress rotated logs (default: `true`).
+- `grpc.keepalive` - gRPC keepalive enforcement configuration.
+  - `min_time_seconds` - Minimum time (seconds) between client pings before sending GOAWAY (`too_many_pings`).
+  - `permit_without_stream` - Allow client pings when there are no active streams.
+- `watch_tower` - Optional API keys for Watchtower integrations.
+  - `vt_api_key` - VirusTotal API key.
+  - `xforce_api_key` - IBM X-Force API key.
+  - `xforce_api_password` - IBM X-Force API password.
+- `go_proxy` - Optional `GOPROXY` override used by server-side builds.
+- `http_default.headers` - Default HTTP headers for anonymous server responses.
+  - `method` - HTTP method to apply to (for example `GET`).
+  - `name` - Header name.
+  - `value` - Header value.
+  - `probability` - Percent chance (0-100) that the header is added.
+- `notifications` - Server notification config. See [Notifications](/docs?name=Notifications) for the full schema.
+- `cc` - Optional compiler overrides map (`GOOS/GOARCH` -> C compiler path).
+- `cxx` - Optional compiler overrides map (`GOOS/GOARCH` -> C++ compiler path).
+
+## Database Configuration
+
+Sliver supports SQL database configurations in `~/.sliver/configs/database.yaml`.
+
+If no configuration file exists, a default YAML configuration is generated and written to disk on startup. If a legacy `database.json` exists, Sliver reads it, writes `database.yaml`, and renames the old file to `.database.json-old`.
+
+#### Default Database Configuration
+
+```yaml
+dialect: sqlite3
+database: ""
+username: ""
+password: ""
+host: ""
+port: 0
+params:
+    cache: shared
+pragmas:
+    busy_timeout: "5000"
+    journal_mode: WAL
+    synchronous: NORMAL
+    temp_store: MEMORY
+max_idle_conns: 10
+max_open_conns: 100
+log_level: warn
+```
+
+#### Configuration Options
+
+- `dialect` - Database backend (`mysql`, `postgresql`, or `sqlite3`).
+- `database` - Database name (ignored for `sqlite3`).
+- `username` - Database username.
+- `password` - Database password.
+- `host` - Database host.
+- `port` - Database TCP port.
+- `params` - Key/value map of dialect-specific DSN parameters.
+- `pragmas` - SQLite pragma map. Used when `dialect` is `sqlite3` and `params` does not already set `_pragma`.
+- `max_idle_conns` - Max idle DB connections (minimum enforced value is `1`).
+- `max_open_conns` - Max open DB connections (minimum enforced value is `1`).
+- `log_level` - GORM DB logging level (`silent`, `error`, `warn`, `info`).
+
+With the default SQLite configuration, Sliver stores the DB at `~/.sliver/sliver.db`.
+
+# Client Configuration
+
+### Operator
+
+Operator client configs are generated by the server and should be copied into `~/.sliver-client/configs/`. These files are currently JSON (`*.cfg`), not YAML.
+
+For details on generating them, see [multiplayer mode](/docs?name=Multi-player+Mode).
+
+```json
+{
+  "operator": "alice",
+  "token": "<operator-auth-token>",
+  "lhost": "localhost",
+  "lport": 31337,
+  "ca_certificate": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n",
+  "private_key": "-----BEGIN EC PRIVATE KEY-----\n...\n-----END EC PRIVATE KEY-----\n",
+  "certificate": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"
+}
+```
+
+**Note:** The `operator` field is mostly a local label in the client. Server-side identity is derived from the client certificate (`CommonName`) and token material generated by the server. If you need to rename an operator, generate a new client configuration.
+
+The default operator profile does not contain a `wg` block, and the client connects directly to the multiplayer mTLS listener.
+
+Multiplayer WireGuard is opt-in. Generate a WireGuard-enabled profile with `new-operator --enable-wg` or `sliver-server operator --enable-wg`; this adds the following block:
+
+```json
+"wg": {
+  "enabled": true,
+  "server_pub_key": "<multiplayer-wg-server-pubkey>",
+  "client_private_key": "<operator-wg-private-key>",
+  "client_pub_key": "<operator-wg-public-key>",
+  "client_ip": "100.65.0.10",
+  "server_ip": "100.65.0.1"
+}
+```
+
+The listener must also be started with `multiplayer --enable-wg` or `sliver-server daemon --enable-wg`. The official client reads the profile and automatically uses WireGuard only when `wg.enabled` is true; otherwise it connects directly. A profile from the withdrawn WireGuard-by-default release may contain a `wg` block without the `enabled` field. Such a profile stays in direct mode unless you deliberately force WireGuard with `sliver-client --enable-wg`.
+
+The client flags override the profile selection:
+
+- `sliver-client --enable-wg` forces WireGuard and requires usable tunnel settings in the selected profile.
+- `sliver-client --disable-wg` forces a direct gRPC/mTLS connection even when `wg.enabled` is true.
+- Without either flag, `sliver-client` follows `wg.enabled`. The two override flags cannot be used together.
