@@ -933,6 +933,15 @@ message HTTPC2ImplantConfig {
   // HttpSuppressHeaders is a comma-separated list of header names to remove from the
   // outbound request (e.g. Go-injected "Accept-Encoding"). Empty = no suppression.
   string HttpSuppressHeaders = 25;
+
+  // [ HTTP/2 client (optional) ]
+  // TlsHttp2 enables a real HTTP/2 client (golang.org/x/net/http2) on top of the
+  // uTLS dialer. Only honored when TlsEnabled is true. The implant forces "h2"
+  // into the ALPN list and fails closed if the peer does not negotiate h2.
+  // This closes the JA4 ALPN mismatch where a Chrome preset advertises h2 but the
+  // client could only speak HTTP/1.1. When enabled, HttpHeaderOrder/JA4H no longer
+  // applies (HTTP/2 uses HPACK frames, not the HTTP/1.1 text header block).
+  bool TlsHttp2 = 26;
 }
 
 message HTTPC2Cookie {

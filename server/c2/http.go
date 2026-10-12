@@ -491,10 +491,12 @@ func (s *SliverHTTPC2) DefaultRespHeaders(next http.Handler) http.Handler {
 		}
 
 		if profile != nil {
-			if s.c2Config[0].ServerConfig.RandomVersionHeaders {
+			// 使用当前请求匹配到的 profile,而不是 s.c2Config[0],
+			// 否则多 profile 时响应头会取自列表里的第一个 profile。
+			if profile.ServerConfig.RandomVersionHeaders {
 				resp.Header().Set("Server", s.getServerHeader())
 			}
-			for _, header := range s.c2Config[0].ServerConfig.Headers {
+			for _, header := range profile.ServerConfig.Headers {
 				if 0 < header.Probability && header.Probability < 100 {
 					roll := util.Intn(99) + 1
 					if header.Probability < int32(roll) {

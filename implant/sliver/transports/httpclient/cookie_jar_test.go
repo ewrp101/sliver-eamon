@@ -18,6 +18,10 @@ package httpclient
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// NOTE: 该文件会被 C2 profile 模板引擎渲染,文件里不能出现 Go 复合字面量
+// 产生的双花括号(会被当成模板 action)。因此下面用命名变量代替
+// 匿名结构体切片的写法。
+
 import (
 	"net/http"
 	"net/url"
@@ -32,21 +36,26 @@ func TestJarReplacesSameNameAndHonorsDeletion(t *testing.T) {
 	jar := cookieJar()
 	u, _ := url.Parse("https://c2.example/")
 
-	jar.SetCookies(u, []*http.Cookie{{Name: "JSESSIONID", Value: "first"}})
-	jar.SetCookies(u, []*http.Cookie{{Name: "JSESSIONID", Value: "second"}})
+	first := &http.Cookie{Name: "JSESSIONID", Value: "first"}
+	second := &http.Cookie{Name: "JSESSIONID", Value: "second"}
+	jar.SetCookies(u, []*http.Cookie{first})
+	jar.SetCookies(u, []*http.Cookie{second})
 
 	got := jar.Cookies(u)
 	if len(got) != 1 || got[0].Value != "second" {
 		t.Fatalf("expected a single cookie with the latest value, got %#v", got)
 	}
 
-	jar.SetCookies(u, []*http.Cookie{{Name: "JSESSIONID", Value: "", MaxAge: -1}})
+	deleted := &http.Cookie{Name: "JSESSIONID", Value: "", MaxAge: -1}
+	jar.SetCookies(u, []*http.Cookie{deleted})
 	if got := jar.Cookies(u); len(got) != 0 {
 		t.Fatalf("expected Max-Age<0 to delete the cookie, got %#v", got)
 	}
 
-	jar.SetCookies(u, []*http.Cookie{{Name: "authToken", Value: "x"}})
-	jar.SetCookies(u, []*http.Cookie{{Name: "authToken", Value: "y", Expires: time.Now().Add(-time.Minute)}})
+	live := &http.Cookie{Name: "authToken", Value: "x"}
+	expired := &http.Cookie{Name: "authToken", Value: "y", Expires: time.Now().Add(-time.Minute)}
+	jar.SetCookies(u, []*http.Cookie{live})
+	jar.SetCookies(u, []*http.Cookie{expired})
 	if got := jar.Cookies(u); len(got) != 0 {
 		t.Fatalf("expected an expired cookie to be deleted, got %#v", got)
 	}

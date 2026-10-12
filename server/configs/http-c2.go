@@ -253,6 +253,7 @@ func checkTLSClientHelloConfig(config *clientpb.HTTPC2ImplantConfig) error {
 		config.TlsClientHelloID = ""
 		config.TlsCustomSpecJSON = ""
 		config.TlsAlpnOverride = ""
+		config.TlsHttp2 = false
 		// HTTP 头层指纹独立于 TLS 指纹,明文 HTTP 场景同样生效
 		return checkHTTPHeaderFingerprint(config)
 	}
@@ -266,6 +267,21 @@ func checkTLSClientHelloConfig(config *clientpb.HTTPC2ImplantConfig) error {
 	alpnProtocols, err := parseAlpnTokens(config.TlsAlpnOverride)
 	if err != nil {
 		return err
+	}
+
+	// HTTP/2 客户端强制 ALPN 含 h2;若用户同时配了不含 h2 的 ALPN 覆盖,
+	// 该覆盖会被 implant 忽略(以 h2,http/1.1 为准)。
+	if config.TlsHttp2 && len(alpnProtocols) > 0 {
+		hasH2 := false
+		for _, token := range alpnProtocols {
+			if token == "h2" {
+				hasH2 = true
+				break
+			}
+		}
+		if !hasH2 {
+			httpC2ConfigLog.Warnf("TlsHttp2 已启用且 TlsAlpnOverride=%q 不含 h2:implant 会将 ALPN 强制覆写为 h2,http/1.1", config.TlsAlpnOverride)
+		}
 	}
 
 	if config.TlsCustomSpecJSON != "" {

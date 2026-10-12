@@ -133,6 +133,9 @@ type HttpC2ImplantConfig struct {
 	// [ HTTP 请求层指纹 (JA4H) ]
 	HttpHeaderOrder     string `gorm:"type:text"`
 	HttpSuppressHeaders string `gorm:"type:text"`
+
+	// [ HTTP/2 客户端 (可选) ]
+	TLSHTTP2 bool
 }
 
 func (h *HttpC2ImplantConfig) BeforeCreate(tx *gorm.DB) (err error) {
@@ -177,6 +180,7 @@ func (h *HttpC2ImplantConfig) ToProtobuf() *clientpb.HTTPC2ImplantConfig {
 		TlsAlpnOverride:     h.TLSAlpnOverride,
 		HttpHeaderOrder:     h.HttpHeaderOrder,
 		HttpSuppressHeaders: h.HttpSuppressHeaders,
+		TlsHttp2:            h.TLSHTTP2,
 	}
 }
 
@@ -360,6 +364,7 @@ func HTTPC2ConfigFromProtobuf(pbHttpC2Config *clientpb.HTTPC2Config) *HttpC2Conf
 		TLSAlpnOverride:     pbHttpC2Config.ImplantConfig.TlsAlpnOverride,
 		HttpHeaderOrder:     pbHttpC2Config.ImplantConfig.HttpHeaderOrder,
 		HttpSuppressHeaders: pbHttpC2Config.ImplantConfig.HttpSuppressHeaders,
+		TLSHTTP2:            pbHttpC2Config.ImplantConfig.TlsHttp2,
 	}
 
 	// C2 Config
@@ -398,6 +403,8 @@ func RandomizeImplantConfig(h *clientpb.HTTPC2ImplantConfig, goos string, goarch
 		// HTTP 层指纹字段同样必须透传
 		HttpHeaderOrder:     h.HttpHeaderOrder,
 		HttpSuppressHeaders: h.HttpSuppressHeaders,
+		// HTTP/2 客户端开关
+		TlsHttp2: h.TlsHttp2,
 	}
 }
 

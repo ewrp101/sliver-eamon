@@ -52,6 +52,7 @@
     "tls_client_hello_id": "chrome_133",
     "tls_custom_spec_json": "",
     "tls_alpn": "http/1.1",
+    "tls_http2": false,
 
     "http_header_order": "Host,Connection,Content-Length,sec-ch-ua,sec-ch-ua-mobile,sec-ch-ua-platform,User-Agent,Accept,Sec-Fetch-Site,Sec-Fetch-Mode,Sec-Fetch-Dest,Referer,Origin,Content-Type,Accept-Encoding,Accept-Language,Cookie",
     "http_suppress_headers": ""

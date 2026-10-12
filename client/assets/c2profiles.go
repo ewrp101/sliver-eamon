@@ -93,4 +93,11 @@ type HTTPC2ImplantConfig struct {
 	// HTTPSuppressHeaders 为逗号分隔的 header 名列表,从出站请求中移除
 	// (如 Go 自动注入的 Accept-Encoding)。留空 = 不移除。
 	HTTPSuppressHeaders string `json:"http_suppress_headers"`
+
+	// [ HTTP/2 客户端 (可选) ]
+	// TLSHTTP2 在 uTLS 拨号器之上启用真正的 HTTP/2 客户端(golang.org/x/net/http2)。
+	// 仅在 TLSEnabled 为 true 时生效;会强制 ALPN 含 h2,握手未协商到 h2 则 fail closed。
+	// 用于闭合 JA4 的 ALPN 差异(Chrome 预设广告 h2 而客户端只会 1.1)。
+	// 开启后 HttpHeaderOrder/JA4H 不再适用(HTTP/2 走 HPACK 帧,没有 1.1 文本头块)。
+	TLSHTTP2 bool `json:"tls_http2"`
 }

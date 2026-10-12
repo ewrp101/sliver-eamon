@@ -261,6 +261,7 @@ func C2ConfigToJSON(profileName string, profile *clientpb.HTTPC2Config) (*assets
 		TLSAlpn:             profile.ImplantConfig.TlsAlpnOverride,
 		HTTPHeaderOrder:     profile.ImplantConfig.HttpHeaderOrder,
 		HTTPSuppressHeaders: profile.ImplantConfig.HttpSuppressHeaders,
+		TLSHTTP2:            profile.ImplantConfig.TlsHttp2,
 	}
 
 	var headers []assets.NameValueProbability
@@ -392,6 +393,7 @@ func C2ConfigToProtobuf(profileName string, config *assets.HTTPC2Config) *client
 		TlsAlpnOverride:     config.ImplantConfig.TLSAlpn,
 		HttpHeaderOrder:     config.ImplantConfig.HTTPHeaderOrder,
 		HttpSuppressHeaders: config.ImplantConfig.HTTPSuppressHeaders,
+		TlsHttp2:            config.ImplantConfig.TLSHTTP2,
 	}
 
 	// Server Config
@@ -564,6 +566,12 @@ func PrintC2Profiles(profile *clientpb.HTTPC2Config, con *console.SliverClient) 
 		tw.AppendRow(table.Row{
 			"TLS ALPN override",
 			profile.ImplantConfig.TlsAlpnOverride,
+		})
+	}
+	if profile.ImplantConfig.TlsEnabled && profile.ImplantConfig.TlsHttp2 {
+		tw.AppendRow(table.Row{
+			"TLS HTTP/2 client",
+			"enabled (ALPN forced to h2,http/1.1)",
 		})
 	}
 	if profile.ImplantConfig.HttpHeaderOrder != "" {

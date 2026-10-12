@@ -445,7 +445,7 @@ func HTTPC2ConfigUpdate(newConf *clientpb.HTTPC2Config, oldConf *clientpb.HTTPC2
 	// overwrite 后旧配置仍然生效。这里用显式 Select 强制覆盖这些列。
 	err = Session().Model(&models.HttpC2ImplantConfig{}).
 		Where("id = ?", clientID).
-		Select("TLSEnabled", "TLSClientHelloID", "TLSCustomSpecJSON", "TLSAlpnOverride", "HttpHeaderOrder", "HttpSuppressHeaders").
+		Select("TLSEnabled", "TLSClientHelloID", "TLSCustomSpecJSON", "TLSAlpnOverride", "HttpHeaderOrder", "HttpSuppressHeaders", "TLSHTTP2").
 		Updates(c2Config.ImplantConfig)
 	if err.Error != nil {
 		return err.Error

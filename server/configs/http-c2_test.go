@@ -218,3 +218,25 @@ func TestCheckHTTPHeaderFingerprintRejectsCriticalSuppress(t *testing.T) {
 		t.Fatalf("expected non-critical suppression to pass, got %v", err)
 	}
 }
+
+// TestCheckTLSClientHelloConfigHTTP2 - TlsHttp2 开关的校验与清理。
+func TestCheckTLSClientHelloConfigHTTP2(t *testing.T) {
+	config := &clientpb.HTTPC2ImplantConfig{
+		TlsEnabled:       true,
+		TlsClientHelloID: "chrome_133",
+		TlsHttp2:         true,
+		TlsAlpnOverride:  "h2,http/1.1",
+	}
+	if err := checkTLSClientHelloConfig(config); err != nil {
+		t.Fatalf("unexpected error for h2 profile: %s", err)
+	}
+
+	// 关闭 TLS 必须同时清掉 TlsHttp2
+	config.TlsEnabled = false
+	if err := checkTLSClientHelloConfig(config); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if config.TlsHttp2 {
+		t.Fatal("expected TlsHttp2 to be cleared when TlsEnabled is false")
+	}
+}
