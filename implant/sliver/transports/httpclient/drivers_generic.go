@@ -20,6 +20,7 @@ package httpclient
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// {{if .Config.IncludeHTTP}}
 import (
 	// {{if .Config.Debug}}
 	"log"
@@ -40,3 +41,5 @@ func GetHTTPDriver(origin string, secure bool, opts *HTTPOptions) (HTTPDriver, e
 		return GoHTTPDriver(origin, secure, opts)
 	}
 }
+
+// {{end}} -IncludeHTTP

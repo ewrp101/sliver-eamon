@@ -201,3 +201,20 @@ func TestCheckImplantConfigRequiresFileSegment(t *testing.T) {
 		t.Fatalf("expected profile with a file segment to pass, got %v", err)
 	}
 }
+
+// TestCheckHTTPHeaderFingerprintRejectsCriticalSuppress 回归测试:抑制 Host /
+// Content-Length / Transfer-Encoding 会直接产出非法 HTTP/1.1 请求,必须拒绝。
+func TestCheckHTTPHeaderFingerprintRejectsCriticalSuppress(t *testing.T) {
+	config := &clientpb.HTTPC2ImplantConfig{
+		TlsEnabled:          false,
+		HttpSuppressHeaders: "Accept-Encoding,Host",
+	}
+	if err := checkTLSClientHelloConfig(config); !errors.Is(err, ErrHTTPHeaderSuppressCritical) {
+		t.Fatalf("expected ErrHTTPHeaderSuppressCritical, got %v", err)
+	}
+
+	config.HttpSuppressHeaders = "Accept-Encoding,X-Go-Header"
+	if err := checkTLSClientHelloConfig(config); err != nil {
+		t.Fatalf("expected non-critical suppression to pass, got %v", err)
+	}
+}

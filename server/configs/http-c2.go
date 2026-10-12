@@ -62,6 +62,9 @@ var (
 	ErrTLSAlpnInvalid         = errors.New("TLS ALPN override contains an invalid RFC 7301 protocol token")
 	ErrTLSAlpnRandomized      = errors.New("TLS ALPN override cannot be combined with a randomized preset (the spec is generated at runtime)")
 	ErrHTTPHeaderOrderInvalid = errors.New("HTTP header order/suppress list contains an invalid header name")
+	// 抑制 Host/Content-Length/Transfer-Encoding 会直接产出非法请求(HTTP/1.1
+	// 必须带 Host;带 body 的请求必须有 Content-Length 或 Transfer-Encoding)。
+	ErrHTTPHeaderSuppressCritical = errors.New("cannot suppress a required HTTP header (Host/Content-Length/Transfer-Encoding)")
 
 	fileNameExp = regexp.MustCompile(`[^a-zA-Z0-9\\._-]+`)
 
@@ -343,17 +346,39 @@ func parseAlpnTokens(value string) ([]string, error) {
 	return tokens, nil
 }
 
+// criticalSuppressedHeaders - 绝不允许从出站请求中删除的头(会破坏 HTTP/1.1 报文)
+var criticalSuppressedHeaders = map[string]bool{
+	"host":              true,
+	"content-length":    true,
+	"transfer-encoding": true,
+}
+
 // checkHTTPHeaderFingerprint - 校验 HTTP 头块指纹配置
 func checkHTTPHeaderFingerprint(config *clientpb.HTTPC2ImplantConfig) error {
-	for _, list := range []string{config.HttpHeaderOrder, config.HttpSuppressHeaders} {
+	validate := func(list string) ([]string, error) {
+		names := []string{}
 		for _, name := range strings.Split(list, ",") {
 			name = strings.TrimSpace(name)
 			if name == "" {
 				continue
 			}
 			if !tokenExp.MatchString(name) {
-				return fmt.Errorf("%w: %q", ErrHTTPHeaderOrderInvalid, name)
+				return nil, fmt.Errorf("%w: %q", ErrHTTPHeaderOrderInvalid, name)
 			}
+			names = append(names, name)
+		}
+		return names, nil
+	}
+	if _, err := validate(config.HttpHeaderOrder); err != nil {
+		return err
+	}
+	suppressed, err := validate(config.HttpSuppressHeaders)
+	if err != nil {
+		return err
+	}
+	for _, name := range suppressed {
+		if criticalSuppressedHeaders[strings.ToLower(name)] {
+			return fmt.Errorf("%w: %q", ErrHTTPHeaderSuppressCritical, name)
 		}
 	}
 	return nil

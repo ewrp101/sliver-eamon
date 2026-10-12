@@ -18,6 +18,7 @@ package httpclient
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// {{if .Config.IncludeHTTP}}
 import (
 
 	// {{if .Config.Debug}}
@@ -75,3 +76,5 @@ func WininetDriver(origin string, secure bool, opts *HTTPOptions) (HTTPDriver, e
 	wininetClient.AskProxyCreds = opts.AskProxyCreds
 	return wininetClient, nil
 }
+
+// {{end}} -IncludeHTTP
