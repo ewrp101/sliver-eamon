@@ -80,6 +80,12 @@ const (
 	// pollLivenessRefreshInterval - 长轮询挂起期间周期性刷新会话 last-message,
 	// 避免 sessions 把仍在线但空闲(未收到命令)的会话误判为 [DEAD]。
 	pollLivenessRefreshInterval = 5 * time.Second
+
+	// httpSessionJanitorInterval / httpSessionStaleTimeout - 服务端 stale HTTP
+	// 会话回收:客户端重连后旧 HTTPSession 的 ImplantConn 不会自动关闭,会永久
+	// 残留(内存/会话表增长)。last-message 超过该阈值的会话会被回收并关闭。
+	httpSessionJanitorInterval = 15 * time.Second
+	httpSessionStaleTimeout    = 60 * time.Second
 )
 
 var (
@@ -158,6 +164,9 @@ type SliverHTTPC2 struct {
 	Cleanup      func()
 
 	c2Config []*clientpb.HTTPC2Config // C2 configs
+
+	janitorStop chan struct{}
+	janitorOnce sync.Once
 }
 
 func (s *SliverHTTPC2) getServerHeader() string {
@@ -249,7 +258,57 @@ func StartHTTPListener(req *clientpb.HTTPListenerReq) (*SliverHTTPC2, error) {
 		}
 	}
 
+	server.janitorStop = make(chan struct{})
+	baseCleanup := server.Cleanup
+	server.Cleanup = func() {
+		server.janitorOnce.Do(func() { close(server.janitorStop) })
+		if baseCleanup != nil {
+			baseCleanup()
+		}
+	}
+	server.startSessionJanitor()
+
 	return server, nil
+}
+
+// startSessionJanitor - 周期性回收 stale HTTP 会话。关闭其 ImplantConn 会同时
+// 触发 core.Session 的清理与 HTTPSessions 的移除,避免重连后累积。
+func (s *SliverHTTPC2) startSessionJanitor() {
+	go func() {
+		ticker := time.NewTicker(httpSessionJanitorInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.janitorStop:
+				return
+			case <-ticker.C:
+				s.reapStaleSessions()
+			}
+		}
+	}()
+}
+
+func (s *SliverHTTPC2) reapStaleSessions() {
+	cutoff := time.Now().Add(-httpSessionStaleTimeout)
+	var stale []*HTTPSession
+	s.HTTPSessions.mutex.RLock()
+	for _, session := range s.HTTPSessions.active {
+		if session.ImplantConn == nil {
+			continue
+		}
+		if session.ImplantConn.GetLastMessage().Before(cutoff) {
+			stale = append(stale, session)
+		}
+	}
+	s.HTTPSessions.mutex.RUnlock()
+	for _, session := range stale {
+		if s.HTTPSessions.RemoveIf(session.ID, session) {
+			httpLog.Infof("Reaping stale HTTP session %s (idle > %s)", session.ID, httpSessionStaleTimeout)
+			if session.ImplantConn != nil {
+				session.ImplantConn.Close()
+			}
+		}
+	}
 }
 
 func getHTTPSConfig(req *clientpb.HTTPListenerReq) *tls.Config {

@@ -310,6 +310,7 @@ func NewImplantConnection(transport string, remoteAddress string) *ImplantConnec
 		ID:               generateImplantConnectionID(),
 		Send:             make(chan *sliverpb.Envelope),
 		RespMutex:        &sync.RWMutex{},
+		LastMessage:      time.Now(),
 		LastMessageMutex: &sync.RWMutex{},
 		Resp:             map[int64]chan *sliverpb.Envelope{},
 		Transport:        transport,
