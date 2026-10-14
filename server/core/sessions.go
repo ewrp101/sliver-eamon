@@ -88,6 +88,15 @@ func (s *Session) LastCheckin() time.Time {
 // defaultSessionCheckinWindow - reconnect/poll 间隔都未知时使用的健康窗口兜底值。
 const defaultSessionCheckinWindow = 60 * time.Second
 
+// httpSessionCheckinWindow - HTTP session 专用的健康窗口基准值。
+// pollHandler 在长轮询期间每 5s 刷新一次 last-message,因此窗口只要明显大于
+// 刷新间隔即可;25s(+10s padding≈35s)既能避免空闲在线会话被误判,
+// 又能让真死在大约 35s 内被发现。
+const httpSessionCheckinWindow = 25 * time.Second
+
+// httpTransportName - core.NewImplantConnection 里 HTTP(S) 使用的 transport 名
+const httpTransportName = "http(s)"
+
 // IsDead - See if last check-in is within expected variance
 func (s *Session) IsDead() bool {
 	sessionsLog.Debugf("Checking health of %s", s.ID)
@@ -101,16 +110,21 @@ func (s *Session) IsDead() bool {
 	// 一次 check-in 间隔超过 10s,就会被误报 [DEAD](在沙箱/长轮询抖动下
 	// 很容易触发)。这里忽略未知(<=0)的项,并对两者都未知的情况给兜底值。
 	window := time.Duration(0)
-	for _, v := range []time.Duration{time.Duration(s.ReconnectInterval), time.Duration(s.PollTimeout)} {
-		if v <= 0 {
-			continue
+	if s.Connection.Transport == httpTransportName {
+		// HTTP session:长轮询期间每 5s 刷新 last-message,窗口与长轮询时长无关。
+		window = httpSessionCheckinWindow
+	} else {
+		for _, v := range []time.Duration{time.Duration(s.ReconnectInterval), time.Duration(s.PollTimeout)} {
+			if v <= 0 {
+				continue
+			}
+			if window == 0 || v < window {
+				window = v
+			}
 		}
-		if window == 0 || v < window {
-			window = v
+		if window == 0 {
+			window = defaultSessionCheckinWindow
 		}
-	}
-	if window == 0 {
-		window = defaultSessionCheckinWindow
 	}
 	if timePassed < window+padding {
 		sessionsLog.Debugf("Last message within check-in window + padding")
