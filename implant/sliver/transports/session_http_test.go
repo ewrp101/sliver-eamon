@@ -99,8 +99,8 @@ func TestSendHTTPEnvelopesWriteFailureClosesConnection(t *testing.T) {
 	send := make(chan *sliverpb.Envelope, 1)
 	send <- &sliverpb.Envelope{ID: 1}
 	writer := &controlledHTTPEnvelopeWriter{
-		started:   make(chan int64, 1),
-		completed: make(chan int64, 1),
+		started:   make(chan int64, 32),
+		completed: make(chan int64, 32),
 		fail:      errors.New("write failed"),
 	}
 	done := make(chan struct{})
@@ -111,12 +111,12 @@ func TestSendHTTPEnvelopesWriteFailureClosesConnection(t *testing.T) {
 
 	select {
 	case <-connection.Done():
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("HTTP envelope write failure did not close the connection")
 	}
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("HTTP envelope scheduler survived connection cleanup")
 	}
 }

@@ -488,6 +488,11 @@ func (s *SliverHTTPClient) ReadEnvelope() (*pb.Envelope, error) {
 		// {{end}}
 		return nil, err
 	}
+	if resp == nil {
+		// 轮询超时被当作空轮询时 DoPoll 返回 nil 响应(无错误),
+		// 这里必须当空结果处理,否则会 resp.StatusCode 空指针 panic。
+		return nil, nil
+	}
 	if resp.StatusCode == http.StatusForbidden {
 		// {{if .Config.Debug}}
 		log.Printf("Server responded with invalid session for %v", s.SessionID)

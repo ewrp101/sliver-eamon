@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/bishopfox/sliver/implant/sliver/cryptography"
@@ -48,6 +49,7 @@ func newHTTPWriteTestClient(response *http.Response) *SliverHTTPClient {
 		SessionCtx: cryptography.NewCipherContext(key),
 		SessionID:  "test-session",
 		Options:    &HTTPOptions{},
+		pollMutex:  &sync.Mutex{},
 	}
 }
 
@@ -116,4 +118,18 @@ type errorHTTPReader struct {
 
 func (reader errorHTTPReader) Read([]byte) (int, error) {
 	return 0, reader.err
+}
+
+// TestReadEnvelopeNilResponseIsEmptyPoll 回归测试:DoPoll 把轮询超时当作空轮询时
+// 会返回 (nil, nil, nil),ReadEnvelope 不能因此解引用 nil 响应而 panic
+// (否则植入体会直接崩溃 → 表现为会话反复上下线)。
+func TestReadEnvelopeNilResponseIsEmptyPoll(t *testing.T) {
+	client := newHTTPWriteTestClient(nil)
+	envelope, err := client.ReadEnvelope()
+	if err != nil {
+		t.Fatalf("ReadEnvelope() error = %v, want nil", err)
+	}
+	if envelope != nil {
+		t.Fatalf("ReadEnvelope() envelope = %#v, want nil", envelope)
+	}
 }
