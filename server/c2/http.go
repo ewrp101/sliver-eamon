@@ -76,6 +76,10 @@ const (
 	DefaultLongPollTimeout     = time.Second
 	DefaultLongPollJitter      = time.Second
 	minPollTimeout             = time.Second
+
+	// pollLivenessRefreshInterval - 长轮询挂起期间周期性刷新会话 last-message,
+	// 避免 sessions 把仍在线但空闲(未收到命令)的会话误判为 [DEAD]。
+	pollLivenessRefreshInterval = 5 * time.Second
 )
 
 var (
@@ -743,38 +747,51 @@ func (s *SliverHTTPC2) pollHandler(resp http.ResponseWriter, req *http.Request, 
 	httpLog.Debug("Poll request")
 	httpSession.ImplantConn.UpdateLastMessage()
 
-	select {
-	case <-httpSession.ImplantConn.Done():
-		s.HTTPSessions.RemoveIf(httpSession.ID, httpSession)
-		return
-	case envelope := <-httpSession.ImplantConn.Send:
+	// 长轮询期间周期性刷新 last-message:否则当长轮询超时大于健康窗口时,
+	// 仍在线但空闲的会话会被误判为 [DEAD](发出命令后才短暂变回 [ALIVE])。
+	refresh := time.NewTicker(pollLivenessRefreshInterval)
+	defer refresh.Stop()
+	pollDeadline := time.After(s.getServerPollTimeout())
+
+	for {
 		select {
 		case <-httpSession.ImplantConn.Done():
 			s.HTTPSessions.RemoveIf(httpSession.ID, httpSession)
 			return
-		default:
-		}
-		if envelope == nil {
+		case envelope := <-httpSession.ImplantConn.Send:
+			select {
+			case <-httpSession.ImplantConn.Done():
+				s.HTTPSessions.RemoveIf(httpSession.ID, httpSession)
+				return
+			default:
+			}
+			if envelope == nil {
+				return
+			}
+			resp.WriteHeader(http.StatusOK)
+			envelopeData, _ := proto.Marshal(envelope)
+			ciphertext, err := httpSession.CipherCtx.Encrypt(envelopeData)
+			if err != nil {
+				httpLog.Errorf("Failed to encrypt message %s", err)
+				ciphertext = []byte{}
+			}
+			s.noCacheHeader(resp)
+			respData, _ := encoder.Encode(ciphertext)
+			resp.Write(respData)
+			return
+		case <-req.Context().Done():
+			httpLog.Debug("Poll client hang up")
+			return
+		case <-refresh.C:
+			httpSession.ImplantConn.UpdateLastMessage()
+			continue
+		case <-pollDeadline:
+			httpLog.Debug("Poll time out")
+			resp.WriteHeader(http.StatusNoContent)
+			s.noCacheHeader(resp)
+			resp.Write([]byte{})
 			return
 		}
-		resp.WriteHeader(http.StatusOK)
-		envelopeData, _ := proto.Marshal(envelope)
-		ciphertext, err := httpSession.CipherCtx.Encrypt(envelopeData)
-		if err != nil {
-			httpLog.Errorf("Failed to encrypt message %s", err)
-			ciphertext = []byte{}
-		}
-		s.noCacheHeader(resp)
-		respData, _ := encoder.Encode(ciphertext)
-		resp.Write(respData)
-	case <-req.Context().Done():
-		httpLog.Debug("Poll client hang up")
-		return
-	case <-time.After(s.getServerPollTimeout()):
-		httpLog.Debug("Poll time out")
-		resp.WriteHeader(http.StatusNoContent)
-		s.noCacheHeader(resp)
-		resp.Write([]byte{})
 	}
 }
 
