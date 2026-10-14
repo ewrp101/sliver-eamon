@@ -85,18 +85,38 @@ func (s *Session) LastCheckin() time.Time {
 	return s.Connection.GetLastMessage()
 }
 
+// defaultSessionCheckinWindow - reconnect/poll 间隔都未知时使用的健康窗口兜底值。
+const defaultSessionCheckinWindow = 60 * time.Second
+
 // IsDead - See if last check-in is within expected variance
 func (s *Session) IsDead() bool {
 	sessionsLog.Debugf("Checking health of %s", s.ID)
 	sessionsLog.Debugf("Last checkin was %v", s.LastCheckin())
 	padding := time.Duration(10 * time.Second) // Arbitrary margin of error
 	timePassed := time.Since(s.LastCheckin())
-	reconnect := time.Duration(s.ReconnectInterval)
-	pollTimeout := time.Duration(s.PollTimeout)
-	if timePassed < reconnect+padding && timePassed < pollTimeout+padding {
-		sessionsLog.Debugf("Last message within reconnect interval / poll timeout + padding")
+
+	// 取已知(>0)的 check-in 间隔里最小的一个作为健康窗口。
+	// 旧逻辑直接用 pollTimeout+padding,而 HTTP session 从不设置
+	// PollTimeout,于是窗口被压到只有 padding(10s):一个活跃会话只要
+	// 一次 check-in 间隔超过 10s,就会被误报 [DEAD](在沙箱/长轮询抖动下
+	// 很容易触发)。这里忽略未知(<=0)的项,并对两者都未知的情况给兜底值。
+	window := time.Duration(0)
+	for _, v := range []time.Duration{time.Duration(s.ReconnectInterval), time.Duration(s.PollTimeout)} {
+		if v <= 0 {
+			continue
+		}
+		if window == 0 || v < window {
+			window = v
+		}
+	}
+	if window == 0 {
+		window = defaultSessionCheckinWindow
+	}
+	if timePassed < window+padding {
+		sessionsLog.Debugf("Last message within check-in window + padding")
 		return false
 	}
+
 	if s.Connection.Transport == consts.MtlsStr {
 		if timePassed < mtls.PingInterval+padding {
 			sessionsLog.Debugf("Last message within ping interval with padding")
